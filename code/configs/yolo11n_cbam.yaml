@@ -1,0 +1,44 @@
+# YOLOv11n + CBAM(注入到 backbone 各阶段后)
+# 类别数会被训练脚本根据 data.yaml 自动覆盖
+nc: 80
+
+# scales: [depth_multiple, width_multiple, max_channels]
+scales:
+  n: [0.50, 0.25, 1024]
+
+# Backbone(YOLOv11n 风格 + CBAM)
+backbone:
+  - [-1, 1, Conv,  [64, 3, 2]]    # 0  P1/2
+  - [-1, 1, Conv,  [128, 3, 2]]   # 1  P2/4
+  - [-1, 2, C3k2,  [256, False, 0.25]]  # 2
+  - [-1, 1, Conv,  [256, 3, 2]]   # 3  P3/8
+  - [-1, 2, C3k2,  [512, False, 0.25]]  # 4
+  - [-1, 1, CBAM,  [512]]         # 5  CBAM 在 P3
+  - [-1, 1, Conv,  [512, 3, 2]]   # 6  P4/16
+  - [-1, 2, C3k2,  [512, True]]   # 7
+  - [-1, 1, CBAM,  [512]]         # 8  CBAM 在 P4
+  - [-1, 1, Conv,  [1024, 3, 2]]  # 9  P5/32
+  - [-1, 2, C3k2,  [1024, True]]  # 10
+  - [-1, 1, SPPF,  [1024, 5]]     # 11
+  - [-1, 2, C2PSA, [1024]]        # 12
+  - [-1, 1, CBAM,  [1024]]        # 13 CBAM 在 P5
+
+# Head(标准 YOLOv11 PAN-FPN)
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 14
+  - [[-1, 8], 1, Concat, [1]]                   # 15  cat with P4-CBAM
+  - [-1, 2, C3k2, [512, False]]                 # 16
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 17
+  - [[-1, 5], 1, Concat, [1]]                   # 18  cat with P3-CBAM
+  - [-1, 2, C3k2, [256, False]]                 # 19  P3 out
+
+  - [-1, 1, Conv, [256, 3, 2]]                  # 20
+  - [[-1, 16], 1, Concat, [1]]                  # 21
+  - [-1, 2, C3k2, [512, False]]                 # 22  P4 out
+
+  - [-1, 1, Conv, [512, 3, 2]]                  # 23
+  - [[-1, 13], 1, Concat, [1]]                  # 24  cat with P5-CBAM
+  - [-1, 2, C3k2, [1024, True]]                 # 25  P5 out
+
+  - [[19, 22, 25], 1, Detect, [nc]]             # 检测头

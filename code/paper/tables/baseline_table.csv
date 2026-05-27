@@ -1,0 +1,4 @@
+model,mAP_50,mAP_50_95,precision,recall,weights_size_mb,train_time_h,epochs
+YOLOv8n,0.7897,0.4899,0.6492,0.7978,5.96,2.84,50
+YOLOv10n,0.7336,0.4595,0.7393,0.5849,5.49,3.61,50
+YOLOv11n,0.7518,0.4923,0.7334,0.7099,5.22,2.86,50

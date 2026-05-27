@@ -1,0 +1,172 @@
+# =============================================================================
+#  Skylark — UAV Inspection Platform
+#  .gitignore
+# =============================================================================
+
+# ─── 数据集（12 GB，绝不进 git） ───────────────────────────────────────────────
+code/data/raw/
+code/data/processed/
+code/data/interim/
+data/
+
+# ─── 训练运行输出（每次跑都几百 MB） ─────────────────────────────────────────────
+code/runs/
+runs/
+
+# ─── 预训练权重（从 ultralytics 自动下载，不进 git） ─────────────────────────────
+*.pt
+*.pth
+*.onnx
+*.engine
+*.trt
+*.bin
+!**/yolo11n.pt.placeholder      # 占位说明文件可以进
+!**/configs/*.pt                # 如果 configs 下有 .pt 是配置错误，已 exclude
+
+# ─── 临时与缓存 ─────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.cache/
+
+# ─── Conda / venv 环境 ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+.python-version
+
+# ─── IDE 与编辑器 ───────────────────────────────────────────────────────────
+.idea/
+.vscode/                  # 工作区设置容易泄露本地路径
+.kiro/local/              # Kiro 本地缓存（如有）
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── LaTeX 中间产物 ─────────────────────────────────────────────────────────
+*.aux
+*.log
+*.out
+*.bbl
+*.blg
+*.toc
+*.lof
+*.lot
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.run.xml
+*.bcf
+*.acn
+*.acr
+*.alg
+*.glg
+*.glo
+*.gls
+*.ist
+
+# LaTeX PDF（编译产物，每次都重生成）
+paper/tex/main.pdf
+paper/tex/main_zh.pdf
+
+# ─── 运行时状态文件（不该进 git） ───────────────────────────────────────────────
+code/runs/.gpu_lock.json
+**/.gpu_lock.json
+*.lock
+*.pid
+
+# ─── 日志 ──────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# 注意：我们仍要追踪 .gitignore 自己，所以下面只对其他 log
+!.gitignore
+
+# ─── 大文件 / 媒体 ──────────────────────────────────────────────────────────
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.zip
+*.tar.gz
+*.7z
+*.rar
+
+# ─── 秘密 / 凭据 ────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+secrets/
+credentials.json
+*.pem
+*.key
+config.local.*
+
+# ─── Q2-Q4 模块的预留排除 ─────────────────────────────────────────────────────
+
+# 后端
+platform/backend/__pycache__/
+platform/backend/.pytest_cache/
+platform/backend/htmlcov/
+platform/backend/celerybeat-schedule
+platform/backend/celerybeat.pid
+platform/backend/*.db
+platform/backend/*.sqlite3
+platform/backend/migrations/__pycache__/
+
+# 前端
+platform/frontend/node_modules/
+platform/frontend/dist/
+platform/frontend/.nuxt/
+platform/frontend/.vite/
+platform/frontend/coverage/
+platform/frontend/.npm/
+platform/frontend/yarn-error.log
+
+# Docker
+**/docker-compose.override.yml
+
+# 边缘部署
+edge/**/build/
+edge/**/install/
+edge/**/log/
+
+# 仿真（AirSim 配置可能含本地路径）
+simulation/**/settings.local.json
+simulation/**/replay/
+
+# ─── MinIO / 对象存储数据 ─────────────────────────────────────────────────────
+minio_data/
+storage/
+
+# ─── 操作系统 ──────────────────────────────────────────────────────────────
+desktop.ini
+
+# =============================================================================
+#  反向白名单（即使匹配上面规则也强制纳入）
+# =============================================================================
+
+# 我们要进 git 的占位文件 / 示例
+!**/.gitkeep
+!**/.gitkeep_example
+!docs/architecture/*.png
+!docs/architecture/*.svg
+!paper/figures/*.png       # 论文图必须进 git
+!paper/figures/*.pdf
+!paper/figures/*.svg
+!paper/tex/figures/*.png
+!paper/tex/figures/*.pdf
+
+# 数据集划分配置（小文件，应该追踪）
+!code/data/processed/pvel_yolo/data.yaml

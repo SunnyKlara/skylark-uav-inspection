@@ -1,0 +1,50 @@
+# =====================================================================
+# 毕设项目依赖
+#
+# 注意：torch / torchvision 不在这里装！
+#       它们由 00_一键装环境.bat 单独从 cu128 索引安装，
+#       因为 5060 Ti (sm_120) 必须用 PyTorch 2.7.1 + CUDA 12.8。
+#       如果手动跑 pip install -r requirements.txt 之前没装 torch，
+#       请先：
+#         pip install torch==2.7.1 torchvision==0.22.1 \
+#             --index-url https://download.pytorch.org/whl/cu128
+# =====================================================================
+
+# YOLO 框架
+ultralytics>=8.3.0
+
+# 数据处理
+numpy>=1.26.0,<2.3
+opencv-python>=4.9.0
+Pillow>=10.0.0
+pandas>=2.0.0
+pyyaml>=6.0
+tqdm>=4.66.0
+
+# 可视化
+matplotlib>=3.8.0
+seaborn>=0.13.0
+plotly>=5.18.0
+
+# 实验追踪
+tensorboard>=2.15.0
+# wandb 可选；想用再 pip install wandb
+# wandb>=0.16.0
+
+# 模型分析
+thop>=0.1.1
+onnx>=1.16.0
+onnxruntime-gpu>=1.20.0    # 1.20+ 才有 cu12 wheel；不需要 GPU 推理可换 onnxruntime
+
+# Grad-CAM 可视化
+grad-cam>=1.5.0
+
+# 数据集工具
+pycocotools>=2.0.7
+albumentations>=1.4.0
+
+# 其他实用工具
+scikit-learn>=1.4.0
+scikit-image>=0.22.0
+rich>=13.7.0
+typer>=0.9.0

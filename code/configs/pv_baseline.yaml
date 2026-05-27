@@ -1,0 +1,18 @@
+path: E:\Users\Administrator\Desktop\gp\graduation_project\code\data\processed\pvel_yolo
+train: images/train
+val: images/val
+test: images/test
+names:
+  0: crack
+  1: finger
+  2: black_core
+  3: thick_line
+  4: star_crack
+  5: corner
+  6: fragment
+  7: scratch
+  8: horizontal_dislocation
+  9: vertical_dislocation
+  10: printing_error
+  11: short_circuit
+nc: 12

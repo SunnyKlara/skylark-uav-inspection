@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.venv/
+venv/
+
+# 训练输出
+runs/
+wandb/
+*.pt
+*.pth
+*.onnx
+*.engine
+
+# 数据集
+data/raw/
+data/processed/
+*.zip
+*.tar
+*.tar.gz
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db
