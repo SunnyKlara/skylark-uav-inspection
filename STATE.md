@@ -390,13 +390,40 @@ Get-ChildItem E:\Users\Administrator\Desktop\gp\graduation_project\code\runs -Re
 **已同步修改的文件**（8 处，清单见 `HARDWARE_FLIGHT_LAYER.md` §12）：
 `PROJECT_NORTH_STAR.md` 五条标准 / `MASTER_ARCHITECTURE.md` §2 §4(Q3-M7, Q3-M9, Q3产出) / `STATE.md` §2 §9 / `WINDOW_D_KICKOFF.md` / `flight/MODULE_STATE.md`
 
+**[2026-07-27] ✅ 商业化路径：不做**
+
+用户明确决定不做商业化。**AGPL-3.0 永久确定，不替换 Ultralytics。**
+
+这条决定的实际效果是把许可证问题彻底关掉：
+
+| 事项 | 变更前 | 变更后 |
+|---|---|---|
+| 评估替换 Ultralytics | Q2 前必须决定，替换预计数周 | **取消该任务** |
+| GPL 组件能否进构建 | 需谨慎，怕堵死商业路径 | **可以**（且经实测全部兼容） |
+| 许可证的后续跟踪开销 | 需持续关注 | **归零** |
+
+**顺带纠正了一个我此前的错误判断**：原先写「GPL-2.0（FAST_LIO）与 AGPL-3.0 不兼容」，
+并据此建立了 copyleft 隔离策略。逐个读 LICENSE 正文核实后该判断**不成立** ——
+关键是遗漏了 "any later version"（or-later）条款。实测结果：
+
+| 组件 | 实测许可证 | 与 AGPL-3.0 兼容 |
+|---|---|---|
+| FAST_LIO | GPL-2.0-**or-later** | ✅ 可升级到 GPL-3.0 |
+| VINS-Fusion | GPL-3.0-or-later | ✅ GPL-3.0 §13 允许与 AGPL-3.0 组合 |
+| ego-planner-swarm | GPL-3.0-or-later | ✅ |
+| kiss-icp / PV-Hawk | MIT | ✅ |
+
+**没有任何候选组件因许可证被排除。** 核实工具 `99_notes/_check_licenses.py`（在参考资料库，不在本仓库）。
+
+隔离策略未删除，但**理由已改写**为「构建体量与可复现性」（对应北极星「任何人 clone
+都能在 30 分钟内跑起来」），并改名为「重型依赖隔离策略」。详见 `THIRD_PARTY_LICENSES.md` §3。
+
+**对「事业起点」定位的影响**：依然成立，只是路径明确为**开源作品集 / 技术能力 / 行业影响力**，
+而非闭源变现。这与北极星「学到的东西 > 做出来的产品 > 论文叙事」的优先级一致 —— 开源更利于前两项。
+
 ### ⏸ 仍待拍板的决策提请
 
-**[2026-07-27] 商业化路径是否保留**
-
-Ultralytics 是 AGPL-3.0，闭源商业化需购买其商业许可或替换检测框架。`PROJECT_NORTH_STAR.md` 写着「不是毕设，是一个事业起点」。若要保留商业化可能，需在 Q2 之前决定是否替换 Ultralytics。
-
-**状态**：当前按「完整开源 + AGPL-3.0」执行。若要改，越早越好。
+（无。截至 2026-07-27 全部已决。）
 
 ### 紧急 Handoffs（< 24h 内必须处理）
 

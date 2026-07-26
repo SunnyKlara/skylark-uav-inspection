@@ -104,6 +104,14 @@
 ## 7. 风险与决策记录
 
 - [2026-07-27] **决策**：仓库许可证定为 AGPL-3.0。根因是 `ultralytics` 为 AGPL-3.0 且本项目要对外提供 Web 服务。详见 `THIRD_PARTY_LICENSES.md`
+- [2026-07-27] **决策（用户拍板）**：**不做商业化**。AGPL-3.0 永久确定，不替换 Ultralytics。
+  对本模块的影响：`flight/` 可自由集成 GPL 组件（ego-planner 避障、FAST_LIO/VINS-Fusion 定位），
+  不必再为「保留商业路径」而回避 —— 这为后续 GNSS 拒止环境巡检留了路
+- [2026-07-27] **纠正自己此前的错误判断**：原先在 `THIRD_PARTY_LICENSES.md` 写「GPL-2.0（FAST_LIO）与 AGPL-3.0 不兼容」，并据此把隔离策略建立在法律冲突上。
+  逐个读 LICENSE 正文核实后该判断**不成立** —— 遗漏了 "any later version" 条款。
+  实测：FAST_LIO = GPL-2.0-**or-later**（可升级到 GPL-3.0）、VINS-Fusion / ego-planner-swarm = GPL-3.0-or-later、kiss-icp / PV-Hawk = MIT。**五个候选组件全部与 AGPL-3.0 兼容**。
+  隔离策略保留但改名为「重型依赖隔离策略」，理由改写为构建体量与可复现性。
+  教训：判断许可证兼容性必须读 LICENSE 正文里的版本条款，不能只看 GitHub API 返回的 SPDX 标识（它不区分 only 与 or-later）
 - [2026-07-27] **决策**：仿真器 AirSim → Gazebo Harmonic。除 AirSim 已归档外，追加决定性理由是本机为 AMD GPU，Isaac Sim/Pegasus 跑不了，AAS 的 CUDA Docker 栈也跑不了
 - [2026-07-27] **决策**：`flight/` 归 Window-E 而非 Window-C。知识域不重叠，混窗口会污染上下文。原属 Window-D 的 `simulation/` 并入本模块
 - [2026-07-27] **决策**：版本锁定 v1.17.0 对齐 AAS，而非更保守的 v1.16.2。理由是代码参考零适配摩擦 > 两轮补丁
