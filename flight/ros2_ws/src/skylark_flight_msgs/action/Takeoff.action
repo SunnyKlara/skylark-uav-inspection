@@ -1,0 +1,35 @@
+# 起飞到指定高度并悬停。
+#
+# 服务端：skylark_autopilot_iface（flight 层）
+# 前置条件：FlightHealth.ready_for_offboard == true
+#
+# 取消语义：取消后飞机保持当前高度悬停，不自动降落。
+
+# ==================== Goal ====================
+float32 altitude_agl_m 10.0              # [m] 目标相对地面高度
+float32 climb_rate_mps 1.5               # [m/s] 上升率上限
+float32 heading_deg -1.0                 # [deg] 起飞后朝向；<0 表示保持当前朝向
+float32 timeout_sec 60.0                 # [s] 超时未到位则失败
+
+---
+# ==================== Result ====================
+bool success
+
+uint8 RESULT_OK=0
+uint8 RESULT_REJECTED_NOT_READY=1        # ready_for_offboard 为 false
+uint8 RESULT_REJECTED_ALREADY_FLYING=2
+uint8 RESULT_TIMEOUT=3
+uint8 RESULT_ABORTED_BY_FAILSAFE=4       # 飞控自己触发了失效保护
+uint8 RESULT_CANCELED=5
+uint8 RESULT_AUTOPILOT_ERROR=6
+uint8 result_code
+
+float32 final_altitude_agl_m             # [m] 实际到达高度
+float32 elapsed_sec
+string message                           # 人类可读说明，失败时必填
+
+---
+# ==================== Feedback ====================
+float32 current_altitude_agl_m           # [m]
+float32 progress                         # 0.0 .. 1.0
+float32 elapsed_sec

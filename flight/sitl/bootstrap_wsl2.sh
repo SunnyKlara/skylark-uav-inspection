@@ -1,0 +1,358 @@
+#!/usr/bin/env bash
+# Skylark flight/ 层 SITL 环境引导（WSL2 Ubuntu 22.04）
+#
+# 目标：在 Windows + WSL2 上装好 PX4 SITL + Gazebo Harmonic + ROS 2 Humble + uXRCE-DDS，
+#       跑通 PX4 官方 offboard 示例，为后续 flight/ 开发打底。
+#
+# 幂等：可反复执行。已完成的步骤会跳过。
+#
+# 版本以 flight/VERSIONS.md 为唯一来源。改版本请改那里，然后同步本文件的变量。
+#
+# 用法：
+#   bash bootstrap_wsl2.sh              # 全量执行
+#   bash bootstrap_wsl2.sh --check      # 只检查环境，不安装
+#   bash bootstrap_wsl2.sh --skip-px4   # 跳过 PX4（已装过时用）
+#
+# 前置条件（在 Windows PowerShell 里做，本脚本不能替你做）：
+#   wsl --install -d Ubuntu-22.04
+#   wsl --set-default Ubuntu-22.04
+#   然后建 C:\Users\<你>\.wslconfig 限制 WSL 资源，见本文件末尾附录
+
+set -euo pipefail
+
+# ============================================================
+# 版本（与 flight/VERSIONS.md 保持一致）
+# ============================================================
+PX4_VERSION="v1.17.0"
+PX4_MSGS_BRANCH="release/1.17"
+XRCE_AGENT_VERSION="v2.4.3"
+ROS_DISTRO_NAME="humble"
+REQUIRED_UBUNTU="22.04"
+
+# ============================================================
+# 路径
+# ============================================================
+PX4_DIR="${HOME}/PX4-Autopilot"
+WS_DIR="${HOME}/skylark_ws"
+AGENT_DIR="${HOME}/Micro-XRCE-DDS-Agent"
+
+# ============================================================
+# 参数解析
+# ============================================================
+CHECK_ONLY=false
+SKIP_PX4=false
+for arg in "$@"; do
+  case "$arg" in
+    --check)    CHECK_ONLY=true ;;
+    --skip-px4) SKIP_PX4=true ;;
+    -h|--help)  sed -n '2,25p' "$0"; exit 0 ;;
+    *) echo "未知参数: $arg（用 --help 看用法）"; exit 2 ;;
+  esac
+done
+
+# ============================================================
+# 输出helpers
+# ============================================================
+BOLD=$'\033[1m'; RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; RST=$'\033[0m'
+step() { echo; echo "${BOLD}==> $*${RST}"; }
+ok()   { echo "  ${GRN}[OK]${RST}   $*"; }
+warn() { echo "  ${YLW}[WARN]${RST} $*"; }
+fail() { echo "  ${RED}[FAIL]${RST} $*"; }
+die()  { fail "$*"; exit 1; }
+
+# ============================================================
+# 0. 环境前置检查
+# ============================================================
+step "环境检查"
+
+if ! grep -qi microsoft /proc/version 2>/dev/null; then
+  warn "未检测到 WSL。本脚本为 WSL2 设计，在原生 Ubuntu 上也能跑，但 §渲染配置 部分可跳过。"
+else
+  ok "运行在 WSL 内"
+fi
+
+UBUNTU_VER="$(lsb_release -rs 2>/dev/null || echo unknown)"
+if [[ "$UBUNTU_VER" != "$REQUIRED_UBUNTU" ]]; then
+  fail "Ubuntu 版本是 ${UBUNTU_VER}，本项目锁定 ${REQUIRED_UBUNTU}（ROS 2 ${ROS_DISTRO_NAME} 的官方平台）"
+  echo "     在 Windows PowerShell 里执行： wsl --install -d Ubuntu-22.04"
+  die "版本不符，中止"
+fi
+ok "Ubuntu ${UBUNTU_VER}"
+
+TOTAL_MEM_GB=$(awk '/MemTotal/ {printf "%.1f", $2/1024/1024}' /proc/meminfo)
+echo "  可用内存: ${TOTAL_MEM_GB} GB"
+if (( $(echo "$TOTAL_MEM_GB < 7.5" | bc -l 2>/dev/null || echo 0) )); then
+  warn "内存 < 8 GB。PX4 编译并行度会受限，Gazebo 可能吃紧。"
+  warn "建议在 Windows 侧配 .wslconfig 提高 WSL 内存上限（见本文件附录）"
+fi
+
+FREE_GB=$(df -BG --output=avail "$HOME" | tail -1 | tr -dc '0-9')
+echo "  ${HOME} 可用空间: ${FREE_GB} GB"
+(( FREE_GB >= 25 )) || warn "可用空间 < 25 GB。PX4 递归 clone + 编译产物约需 8-12 GB，Gazebo 资源另计。"
+
+# GPU / 渲染探测
+step "渲染后端探测"
+GPU_VENDOR="unknown"
+if command -v glxinfo >/dev/null 2>&1; then
+  GPU_RENDERER="$(glxinfo -B 2>/dev/null | grep -i 'OpenGL renderer' || true)"
+  echo "  ${GPU_RENDERER:-未获取到 OpenGL renderer}"
+  if echo "$GPU_RENDERER" | grep -qi nvidia; then GPU_VENDOR="nvidia"
+  elif echo "$GPU_RENDERER" | grep -qiE 'amd|radeon'; then GPU_VENDOR="amd"
+  elif echo "$GPU_RENDERER" | grep -qi 'llvmpipe\|softpipe'; then GPU_VENDOR="software"
+  fi
+else
+  warn "glxinfo 未安装，稍后会装 mesa-utils 再探测"
+fi
+echo "  判定: ${GPU_VENDOR}"
+
+if [[ "$CHECK_ONLY" == true ]]; then
+  step "仅检查模式，退出"
+  exit 0
+fi
+
+# ============================================================
+# 1. 基础依赖
+# ============================================================
+step "安装基础依赖"
+sudo apt-get update -qq
+sudo apt-get install -y --no-install-recommends \
+  git curl wget ca-certificates gnupg lsb-release \
+  build-essential cmake ninja-build ccache \
+  python3 python3-pip python3-venv \
+  mesa-utils x11-apps bc \
+  >/dev/null
+ok "基础依赖就绪"
+
+# ============================================================
+# 2. PX4 SITL + Gazebo Harmonic
+# ============================================================
+if [[ "$SKIP_PX4" == true ]]; then
+  step "跳过 PX4（--skip-px4）"
+else
+  step "PX4-Autopilot ${PX4_VERSION}"
+  if [[ -d "${PX4_DIR}/.git" ]]; then
+    CURRENT_TAG="$(git -C "$PX4_DIR" describe --tags --exact-match 2>/dev/null || echo '<非 tag>')"
+    ok "已存在，当前: ${CURRENT_TAG}"
+    if [[ "$CURRENT_TAG" != "$PX4_VERSION" ]]; then
+      warn "版本与 VERSIONS.md 锁定的 ${PX4_VERSION} 不一致"
+      warn "如需切换: git -C ${PX4_DIR} fetch --tags && git -C ${PX4_DIR} checkout ${PX4_VERSION} && git -C ${PX4_DIR} submodule update --init --recursive"
+    fi
+  else
+    echo "  clone（递归，含子模块，约 1.5-2 GB，视网络需 5-20 分钟）..."
+    git clone --recursive --branch "$PX4_VERSION" \
+      https://github.com/PX4/PX4-Autopilot.git "$PX4_DIR"
+    ok "clone 完成"
+  fi
+
+  step "PX4 工具链 + Gazebo Harmonic"
+  # ubuntu.sh 会装 NuttX 交叉编译工具链、Python 依赖，以及 gz-harmonic
+  # （已在本地源码核实：Tools/setup/ubuntu.sh 支持 22.04，安装 gz-harmonic）
+  if command -v gz >/dev/null 2>&1; then
+    ok "Gazebo 已安装: $(gz --version 2>/dev/null | head -1)"
+  else
+    echo "  执行 PX4 官方安装脚本（会装工具链 + Gazebo Harmonic，约 10-20 分钟）..."
+    bash "${PX4_DIR}/Tools/setup/ubuntu.sh"
+    ok "PX4 工具链与 Gazebo 安装完成"
+    warn "首次安装后建议重启 WSL：在 PowerShell 执行 wsl --shutdown，然后重新进入"
+  fi
+fi
+
+# ============================================================
+# 3. ROS 2 Humble
+# ============================================================
+step "ROS 2 ${ROS_DISTRO_NAME}"
+if [[ -f "/opt/ros/${ROS_DISTRO_NAME}/setup.bash" ]]; then
+  ok "已安装"
+else
+  echo "  添加 ROS 2 apt 源..."
+  sudo curl -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+    -o /usr/share/keyrings/ros-archive-keyring.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo "$UBUNTU_CODENAME") main" \
+    | sudo tee /etc/apt/sources.list.d/ros2.list >/dev/null
+  sudo apt-get update -qq
+  echo "  安装 ros-${ROS_DISTRO_NAME}-desktop（约 2 GB，10-20 分钟）..."
+  sudo apt-get install -y "ros-${ROS_DISTRO_NAME}-desktop" \
+    python3-colcon-common-extensions python3-rosdep >/dev/null
+  ok "ROS 2 ${ROS_DISTRO_NAME} 安装完成"
+fi
+
+# PX4 官方要求的 Python 依赖（版本敏感，empy 3.4+ 会导致 PX4 构建失败）
+step "Python 依赖"
+python3 -m pip install --user -q -U 'empy==3.3.4' pyros-genmsg setuptools packaging
+ok "empy 3.3.4 / pyros-genmsg / setuptools"
+
+if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
+  sudo rosdep init >/dev/null 2>&1 || true
+fi
+rosdep update --rosdistro "$ROS_DISTRO_NAME" >/dev/null 2>&1 || warn "rosdep update 失败（通常是网络问题，可稍后重试）"
+
+# ============================================================
+# 4. Micro XRCE-DDS Agent
+# ============================================================
+step "Micro XRCE-DDS Agent ${XRCE_AGENT_VERSION}"
+if command -v MicroXRCEAgent >/dev/null 2>&1; then
+  ok "已安装: $(command -v MicroXRCEAgent)"
+else
+  if [[ ! -d "${AGENT_DIR}/.git" ]]; then
+    git clone -b "$XRCE_AGENT_VERSION" \
+      https://github.com/eProsima/Micro-XRCE-DDS-Agent.git "$AGENT_DIR"
+  fi
+  mkdir -p "${AGENT_DIR}/build"
+  pushd "${AGENT_DIR}/build" >/dev/null
+  cmake .. -DCMAKE_BUILD_TYPE=Release >/dev/null
+  make -j"$(nproc)" >/dev/null
+  sudo make install >/dev/null
+  sudo ldconfig /usr/local/lib/
+  popd >/dev/null
+  ok "Agent 编译安装完成"
+fi
+
+# ============================================================
+# 5. Skylark ROS 2 工作区
+# ============================================================
+step "Skylark 工作区 ${WS_DIR}"
+mkdir -p "${WS_DIR}/src"
+
+if [[ ! -d "${WS_DIR}/src/px4_msgs/.git" ]]; then
+  git clone -b "$PX4_MSGS_BRANCH" https://github.com/PX4/px4_msgs.git "${WS_DIR}/src/px4_msgs"
+  ok "px4_msgs (${PX4_MSGS_BRANCH})"
+else
+  ACTUAL_BRANCH="$(git -C "${WS_DIR}/src/px4_msgs" rev-parse --abbrev-ref HEAD)"
+  if [[ "$ACTUAL_BRANCH" != "$PX4_MSGS_BRANCH" ]]; then
+    warn "px4_msgs 当前在 ${ACTUAL_BRANCH}，锁定的是 ${PX4_MSGS_BRANCH}"
+    warn "版本不一致会导致话题字段错位。修正: git -C ${WS_DIR}/src/px4_msgs checkout ${PX4_MSGS_BRANCH}"
+  else
+    ok "px4_msgs (${ACTUAL_BRANCH})"
+  fi
+fi
+
+if [[ ! -d "${WS_DIR}/src/px4_ros_com/.git" ]]; then
+  git clone https://github.com/PX4/px4_ros_com.git "${WS_DIR}/src/px4_ros_com"
+  ok "px4_ros_com（官方示例，含 offboard_control）"
+fi
+
+# 把仓库里的 skylark 包软链进工作区，这样改代码不用来回拷
+step "链接 Skylark 自有包"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKYLARK_SRC="$(cd "${SCRIPT_DIR}/../ros2_ws/src" && pwd)"
+if [[ -d "$SKYLARK_SRC" ]]; then
+  for pkg in "$SKYLARK_SRC"/*/; do
+    [[ -d "$pkg" ]] || continue
+    name="$(basename "$pkg")"
+    target="${WS_DIR}/src/${name}"
+    if [[ -L "$target" ]]; then
+      ok "${name}（软链已存在）"
+    elif [[ -e "$target" ]]; then
+      warn "${target} 已存在且不是软链，跳过"
+    else
+      ln -s "$pkg" "$target"
+      ok "${name} -> 软链到工作区"
+    fi
+  done
+else
+  warn "未找到 ${SKYLARK_SRC}，跳过链接"
+fi
+
+# ============================================================
+# 6. 构建工作区
+# ============================================================
+step "构建工作区"
+# shellcheck disable=SC1090
+source "/opt/ros/${ROS_DISTRO_NAME}/setup.bash"
+pushd "$WS_DIR" >/dev/null
+if colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release; then
+  ok "colcon build 成功"
+else
+  fail "colcon build 失败。常见原因："
+  echo "     1. empy 版本不对 -> pip install -U 'empy==3.3.4'"
+  echo "     2. 内存不足被 OOM kill -> colcon build --parallel-workers 1"
+  echo "     3. px4_msgs 分支与固件不一致 -> 见上方 WARN"
+  popd >/dev/null
+  exit 1
+fi
+popd >/dev/null
+
+# ============================================================
+# 7. 渲染配置（AMD / 软渲染兜底）
+# ============================================================
+step "Gazebo 渲染配置"
+GPU_RENDERER="$(glxinfo -B 2>/dev/null | grep -i 'OpenGL renderer' || true)"
+echo "  ${GPU_RENDERER:-未获取到}"
+
+RCFILE="${HOME}/.skylark_env.sh"
+{
+  echo "# Skylark flight/ 环境变量 — 由 bootstrap_wsl2.sh 生成于 $(date -Iseconds)"
+  echo "source /opt/ros/${ROS_DISTRO_NAME}/setup.bash"
+  echo "[ -f ${WS_DIR}/install/setup.bash ] && source ${WS_DIR}/install/setup.bash"
+  echo "export PX4_DIR=${PX4_DIR}"
+  echo "export SKYLARK_WS=${WS_DIR}"
+  if echo "$GPU_RENDERER" | grep -qiE 'amd|radeon'; then
+    echo "# AMD GPU：WSL2 下走 Mesa d3d12 driver"
+    echo "export MESA_D3D12_DEFAULT_ADAPTER_NAME=AMD"
+  fi
+  if echo "$GPU_RENDERER" | grep -qi 'llvmpipe\|softpipe'; then
+    echo "# 未检测到硬件加速，强制软渲染以保证 Gazebo 可用（帧率低但功能完整）"
+    echo "export LIBGL_ALWAYS_SOFTWARE=1"
+  fi
+} > "$RCFILE"
+ok "环境变量写入 ${RCFILE}"
+
+if ! grep -q 'skylark_env.sh' "${HOME}/.bashrc" 2>/dev/null; then
+  echo "[ -f ${RCFILE} ] && source ${RCFILE}" >> "${HOME}/.bashrc"
+  ok "已加入 ~/.bashrc"
+else
+  ok "~/.bashrc 已配置"
+fi
+
+# ============================================================
+# 完成
+# ============================================================
+step "完成"
+cat <<EOF
+
+  ${BOLD}下一步（开三个终端）${RST}
+
+  终端 1 — 启动 XRCE Agent（仿真走 UDP 8888）：
+      MicroXRCEAgent udp4 -p 8888
+
+  终端 2 — 启动 PX4 SITL + Gazebo：
+      cd ${PX4_DIR}
+      make px4_sitl gz_x500
+      # 无图形界面时用： HEADLESS=1 make px4_sitl gz_x500
+
+  终端 3 — 跑官方 offboard 示例（先确认 1、2 已连上）：
+      source ${RCFILE}
+      ros2 topic list | grep /fmu/          # 应能看到 fmu 话题
+      ros2 run px4_ros_com offboard_control
+
+  ${BOLD}验证 Skylark 接口契约已注册${RST}
+      source ${RCFILE}
+      ros2 interface list | grep skylark
+      ros2 interface show skylark_flight_msgs/action/InspectSweep
+
+  ${BOLD}编译 6C 固件（S2 阶段用）${RST}
+      cd ${PX4_DIR} && make px4_fmu-v6c_default
+
+  ${BOLD}提醒${RST}
+  - 版本以 flight/VERSIONS.md 为准，不要随手升级
+  - 每次新终端记得 source ${RCFILE}（已写入 .bashrc，新开终端自动生效）
+  - 首次装完 Gazebo 建议 wsl --shutdown 后重进
+
+EOF
+
+exit 0
+
+# ============================================================
+# 附录：Windows 侧的 .wslconfig
+# ============================================================
+# 建 C:\Users\<你的用户名>\.wslconfig（无扩展名），内容示例：
+#
+#   [wsl2]
+#   memory=16GB
+#   processors=8
+#   swap=8GB
+#   localhostForwarding=true
+#
+# 改完在 PowerShell 执行： wsl --shutdown  然后重新进入 WSL
+# 不配的话，编译 PX4 或跑 Gazebo 可能把 Windows 主机内存吃满导致卡死。

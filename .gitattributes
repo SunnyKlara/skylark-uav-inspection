@@ -1,0 +1,44 @@
+# 行尾规范
+#
+# 背景：本项目在多台 Windows 机器 + WSL2 + Jetson(Linux) 之间协作。
+# shell 脚本一旦带 CRLF，在 bash 里会报 "bad interpreter: /usr/bin/env bash^M"，
+# 这类问题排查起来很浪费时间，用 gitattributes 一次性钉死。
+#
+# 有意不写 `* text=auto` —— 那会让现有的 CRLF Python 文件在下次 checkout 时
+# 全部重写，产生几千行无意义 diff。只对确定需要固定行尾的类型生效。
+
+# 必须 LF：会在 Linux/WSL 下被 bash 或 ROS 2 工具链读取
+*.sh      text eol=lf
+*.bash    text eol=lf
+*.msg     text eol=lf
+*.srv     text eol=lf
+*.action  text eol=lf
+*.params  text eol=lf
+Makefile  text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+
+# 必须 CRLF：只在 Windows 下执行
+# 注意 PowerShell 5.1 按 ANSI 读取 .ps1，含中文的脚本还必须存成 UTF-8 with BOM
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+*.ps1     text eol=crlf
+
+# 二进制，禁止行尾转换与 diff
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.pdf     binary
+*.zip     binary
+*.7z      binary
+*.pt      binary
+*.pth     binary
+*.onnx    binary
+*.engine  binary
+*.ulg     binary
+*.mp4     binary
+
+# 让 git diff 认识这些文本格式
+*.md      diff=markdown
+*.py      diff=python

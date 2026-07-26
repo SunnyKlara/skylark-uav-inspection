@@ -186,14 +186,29 @@ graduation_project/                    ← 项目根
 │   ├── streaming/                     ← RTMP 推流客户端
 │   └── README.md
 │
-├── simulation/                        ← 新：仿真环境
-│   ├── airsim/                        ← AirSim 集成
-│   │   ├── settings.json
-│   │   └── client.py                  ← Python API 控制无人机 + 抓帧
-│   ├── scenarios/                     ← 巡检场景脚本（光伏屋顶 / 输电线路）
-│   └── README.md
+├── flight/                            ← 新（2026-07-27）：飞控层，Window-E 归属
+│   ├── VERSIONS.md                    ← 版本锁定单一来源
+│   ├── MODULE_STATE.md
+│   ├── ros2_ws/src/
+│   │   ├── skylark_flight_msgs/       ← ★ 接口契约（action/msg/srv），飞控无关
+│   │   ├── skylark_autopilot_iface/   ← action 的 PX4 实现
+│   │   ├── skylark_inspection_mode/   ← 巡检任务状态机
+│   │   └── skylark_bridge/            ← 地理配准与数据粘合
+│   ├── params/                        ← QGC 参数基线快照（版本化）+ CHANGELOG
+│   ├── sitl/                          ← PX4 SITL + Gazebo（原 simulation/ 并入此处）
+│   │   ├── bootstrap_wsl2.sh
+│   │   ├── run_sitl.sh
+│   │   └── worlds/                    ← 光伏电站 Gazebo 世界
+│   ├── tools/dds_bandwidth.py         ← 串口带宽估算
+│   └── docs/                          ← WIRING_6C / SERIAL_BUDGET / SAFETY_CHECKLIST
+│
+│   注：原规划的 simulation/ 目录已并入 flight/sitl/。
+│       仿真器由 AirSim 改为 Gazebo Harmonic，见 §6.1。
 │
 ├── .github/workflows/                 ← CI/CD
+├── LICENSE                            ← 新（2026-07-27）：AGPL-3.0
+├── THIRD_PARTY_LICENSES.md            ← 新：依赖许可矩阵 + copyleft 隔离策略
+├── HARDWARE_FLIGHT_LAYER.md           ← 新：飞控层架构增量提案
 └── README.md                          ← 项目主入口
 ```
 
@@ -355,6 +370,29 @@ ONNX 导出+量化 ────► Jetson 部署 ─► 边缘推理服务 ─�
 
 ### 6.1 选型决策
 
+> ⚠ **2026-07-27 变更**：本节原决策为 AirSim，现改为 **Gazebo Harmonic LTS**。
+> 完整理由见 `HARDWARE_FLIGHT_LAYER.md` §2.2。原决策与其依据保留在 §6.1-旧 作为审计轨迹。
+
+**最终选 Gazebo Harmonic LTS**。理由：
+
+| 选项 | 优势 | 劣势 | 选择 |
+|---|---|---|---|
+| **Gazebo Harmonic LTS** | **PX4 v1.16+ 官方仿真器** / 与 PX4 SITL 原生集成 / Apache-2.0 / 可在 AMD GPU 上跑 / AAS 用的就是它 | 视觉不如 UE 系 | ✅ |
+| AirSim | 视觉真实 / Unreal 引擎 | **已被微软归档**；主要社区 fork `Colosseum` **亦已归档** | ❌ |
+| Isaac Sim / Pegasus | 视觉顶级 | **要求 NVIDIA RTX**，飞控开发机是 AMD，跑不了 | ❌ |
+| Webots | 轻量、跨平台 | 与 PX4 集成度低于 Gazebo | 备选 |
+
+三条决定性理由：
+
+1. **AirSim 路线已死**。microsoft/AirSim 已归档（微软官方项目页声明），主要社区 fork `CodexLabsLLC/Colosseum` 的 GitHub API 也返回 `archived=true`。继续选它意味着依赖两个都没人维护的仓库
+2. **飞控开发机是 AMD GPU**（`METAMECHBOOK01`，RX 7600M XT + 780M 核显，无 CUDA）。Isaac Sim / Pegasus 要求 NVIDIA RTX；AirSim 的 UE 管线在 AMD + WSL2 上同样吃力。**Gazebo 是这台机器上唯一可行的选项，不是折中，是唯一解**
+3. **「Gazebo 视觉差」的旧判断已过时**。`aerial-autonomy-stack` 内置 `swiss_town`（Pix4D 摄影测量实景世界）与 `apple_orchard`（BlenderGIS 生成的 GIS 世界），对巡检场景完全够用。且 Docker/脚本化后「装机难」也不成立 —— PX4 官方 `Tools/setup/ubuntu.sh` 会自动装 `gz-harmonic`（已在本地源码第 215-231 行核实）
+
+**附带收益**：`simulation/` 目录并入 `flight/sitl/`，少维护一个模块。Gazebo 世界与 PX4 SITL 本来就是一件事。
+
+<details>
+<summary>§6.1-旧 — 2026-07-27 前的原决策（保留作审计轨迹）</summary>
+
 **最终选 AirSim**。理由：
 
 | 选项 | 优势 | 劣势 | 选择 |
@@ -365,6 +403,10 @@ ONNX 导出+量化 ────► Jetson 部署 ─► 边缘推理服务 ─�
 | Isaac Sim | NVIDIA 出品、视觉顶级 | 商用许可 / 显存高 | ❌ |
 
 > AirSim 已被微软停更，但仓库 stable，社区活跃，文献用得最多。学界引用率高，写论文自动加分。
+
+**为什么当时判断错了**：把「仓库 stable」误读为「可以长期依赖」。实际上归档意味着不再接受安全修复与新版本适配 —— 对一个要跑一年的项目是实质风险。且当时未核实社区 fork 的状态。
+
+</details>
 
 ### 6.2 仿真三个用途
 

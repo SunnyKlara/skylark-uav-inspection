@@ -1,0 +1,26 @@
+# 重定位到指定点（不改变当前任务，仅移动）。
+#
+# 服务端：skylark_autopilot_iface（flight 层）
+# 用途：手动微调、地面站点击移动、调试时快速摆位。
+#
+# 注意：这是即时服务而非 action，因为它只负责"发出指令"，不等待到位。
+#       需要等待到位语义时用 Orbit 或 Revisit。
+
+bool use_global false
+float64 latitude_deg                      # use_global=true 时生效
+float64 longitude_deg
+float32 north_m                           # use_global=false 时生效，相对起飞点 NED
+float32 east_m
+
+float32 altitude_agl_m                    # [m] <=0 表示保持当前高度
+float32 heading_deg -1.0                  # [deg] <0 表示保持当前朝向
+---
+bool success
+
+uint8 RESULT_OK=0
+uint8 RESULT_REJECTED_NOT_READY=1
+uint8 RESULT_REJECTED_OUT_OF_GEOFENCE=2
+uint8 RESULT_REJECTED_TOO_FAR=3           # 单次重定位距离超过安全上限
+uint8 result_code
+
+string message

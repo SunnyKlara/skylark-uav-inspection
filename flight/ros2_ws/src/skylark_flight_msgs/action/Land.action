@@ -1,0 +1,42 @@
+# 返航并降落。
+#
+# 服务端：skylark_autopilot_iface（flight 层）
+#
+# 安全说明：本动作被取消时，飞机停止下降并悬停在当前位置。
+# 但若飞控自身的失效保护已触发（低电量等），取消请求会被忽略 —— 飞控优先级高于 ROS 2 层。
+# 这是有意设计：任何情况下飞控的自主保护不可被外部软件否决。
+
+# ==================== Goal ====================
+uint8 MODE_RETURN_TO_LAUNCH=0            # 先返航到起飞点再降落
+uint8 MODE_LAND_IN_PLACE=1               # 原地降落
+uint8 mode 0
+
+float32 transit_altitude_agl_m 30.0      # [m] 返航巡航高度（MODE_RETURN_TO_LAUNCH 时生效）
+float32 descent_rate_mps 0.8             # [m/s] 下降率上限
+float32 timeout_sec 300.0                # [s]
+
+---
+# ==================== Result ====================
+bool success
+
+uint8 RESULT_OK=0
+uint8 RESULT_REJECTED_NOT_FLYING=1
+uint8 RESULT_TIMEOUT=2
+uint8 RESULT_CANCELED=3
+uint8 RESULT_AUTOPILOT_ERROR=4
+uint8 result_code
+
+bool disarmed                            # 落地后是否已上锁
+float32 elapsed_sec
+string message
+
+---
+# ==================== Feedback ====================
+uint8 PHASE_TRANSIT=0
+uint8 PHASE_DESCENDING=1
+uint8 PHASE_TOUCHDOWN=2
+uint8 phase
+
+float32 current_altitude_agl_m           # [m]
+float32 distance_to_target_m             # [m] 水平距离
+float32 elapsed_sec

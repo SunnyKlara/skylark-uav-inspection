@@ -30,12 +30,30 @@
 
 ## 0.1 活跃窗口（Active Windows）
 
-| 窗口 | 上线时间 | 当前焦点 |
-|---|---|---|
-| **Window-A**（ML 主线）| 2026-05-26 23:35（v1 daemon 上线） | 监控 v1 daemon、准备 v2 启动、维护协议 |
-| **Window-B**（论文 + 文档）| ⏳ 待启动 | — |
-| **Window-C**（后端 + 边缘）| ⏳ Q2 起（约 9 月）| — |
-| **Window-D**（前端 + 仿真）| ⏳ Q3 起（约 12 月）| — |
+| 窗口 | 上线时间 | 机器 | 当前焦点 |
+|---|---|---|---|
+| **Window-A**（ML 主线）| 2026-05-26 23:35（v1 daemon 上线） | ML 训练机 | 监控 v1 daemon、准备 v2 启动、维护协议 |
+| **Window-B**（论文 + 文档）| ⏳ 待启动 | ML 训练机 | — |
+| **Window-C**（后端 + 边缘）| ⏳ Q2 起（约 9 月）| ML 训练机 + Jetson | — |
+| **Window-D**（前端）| ⏳ Q3 起（约 12 月）| 任意 | — |
+| **Window-E**（飞控 + 仿真）| **2026-07-27 上线** | **METAMECHBOOK01**（AMD） | S0 骨架已完成，等硬件上电与 WSL2 安装 |
+
+### 机器分工（2026-07-27 新增事实）
+
+本项目跨**两台物理机器**，通过 GitHub 同步。这是之前文档未记录的重要事实。
+
+| 机器 | 硬件 | 角色 | 窗口 |
+|---|---|---|---|
+| ML 训练机 | RTX 5060 Ti 16 GB（Blackwell sm_120）、32 GB RAM、E 盘 conda | 训练 / 量化 / TensorRT / 论文实验 | A / B / C |
+| `METAMECHBOOK01` | **AMD RX 7600M XT + 780M 核显**、C 盘 1907 GB、**无 CUDA** | PX4 固件 / SITL / QGC 刷参 / 真机联调 | **E** |
+
+**三个推论**：
+
+1. **GPU 抢卡问题不存在**。Window-E 与 v2 训练在物理隔离的两台机器上。此前「装 Gazebo 会抢卡拖慢训练」的担忧**作废**。这也是允许 Window-E 在 Q1 就低强度启动的前提
+2. **飞控开发机没有 CUDA**。Isaac Sim / Pegasus / AAS 的 CUDA Docker 栈在这台机器上都跑不了 → 仿真只能用 Gazebo（见下方决策）
+3. **`STATE.md` 冲突走正常 git merge**。两台机器各自 clone，比原「同一 workspace 多窗口」假设更干净 —— 有 git 做仲裁
+
+判断自己在哪台机器：`Get-PSDrive`（有无 E 盘）或 `nvidia-smi`（有无 NVIDIA GPU）。
 
 ---
 
@@ -228,9 +246,42 @@ PDF 重编：✅ main.pdf 202KB / main_zh.pdf 312KB
 - 无论实验数字好坏，6 条结论都站得住（详见 `MASTER_ARCHITECTURE.md` §2 + `EXPERIMENT_DESIGN_v2.md`）
 
 ### 平台路径
-- 不做飞控层（用大疆 SDK 或仿真替代）
+- ~~不做飞控层（用大疆 SDK 或仿真替代）~~ → **2026-07-27 变更**：已购入 Pixhawk 6C，新增 `flight/` 层。见下方「2026-07-27 决策批次」
 - 不追求工业级可商用，做"作品级"
-- 多场景 ≥ 3（光伏 + 输电 + 道路 / 屋顶 / 桥梁任二）
+- 多场景 ≥ 3（光伏 + 输电 + 道路 / 屋顶 / 桥梁任二）→ ⏸ **有取舍提请待拍板**，见 §待决策
+
+---
+
+## 9.1 决策批次 — 2026-07-27（飞控层落地）
+
+完整依据见 `HARDWARE_FLIGHT_LAYER.md`。以下为已执行的决策。
+
+| # | 决策 | 内容 | 状态 |
+|---|---|---|---|
+| 1 | **仓库许可证** | **AGPL-3.0**。根因：`ultralytics` 是 AGPL-3.0（网络传染），而本项目要对外提供 Web 服务。变更前仓库**没有 LICENSE 文件**，法律上等于保留所有权利，与「完整开源」目标矛盾 | ✅ 已执行 |
+| 2 | **仿真器** | AirSim → **Gazebo Harmonic LTS**。AirSim 已被微软归档，主要 fork Colosseum 亦已归档；且飞控开发机是 AMD GPU，Isaac Sim / AirSim 都跑不了，Gazebo 是唯一解 | ✅ 已执行 |
+| 3 | **新窗口 Window-E** | `flight/**` 归属 Window-E（飞控 + 仿真）。不并入 Window-C —— 知识域不重叠。原属 Window-D 的 `simulation/` 并入 `flight/sitl/` | ✅ 已执行 |
+| 4 | **版本锁定** | PX4 **v1.17.0** / px4_msgs **release/1.17** / ROS 2 **Humble** / Ubuntu **22.04** / Gazebo **Harmonic**。与主要代码参考 `aerial-autonomy-stack` 对齐，零适配摩擦。单一来源 `flight/VERSIONS.md` | ✅ 已执行 |
+
+### 本批次的关键量化发现
+
+| 发现 | 数值 | 影响 |
+|---|---|---|
+| **PX4 默认 DDS 话题集占满 6C 串口预算** | **60,060 B/s = 921600 bps 链路的 100.3%** | 不裁剪直接联调必然丢包。已给出裁剪方案 B（65.7%）。这是低成本平台特有的工程约束，可写进论文 |
+| 带宽第一大户 | `/fmu/out/vehicle_odometry` 100 Hz = 12,400 B/s（占默认总量 20.6%） | GPS 巡检不做 VIO 融合可整条裁掉；但若后续做 GNSS 拒止环境巡检必须加回，届时只能换 6X |
+| 6C 不是 PAB 形态 | 插不进 Holybro Jetson Baseboard | 必须分体式（6C + 独立机载电脑，TELEM2 串口互联）。AAS 算法层可全抄，硬件部署层不可抄 |
+| PX4 自带端到端神经控制器 | `mc_nn_control` + **fmu-v6c 专用编译目标** `make px4_fmu-v6c_neural`，15 KB TFLite 模型编进固件；uORB `NeuralControl` 内置 `inference_time` 埋点自动进 `.ulg` | 已登记为 Q3/Q4 加分机会，**本期明确不做**（`Kconfig` 里 `default n`，稳定性未验证） |
+
+### 本批次的工程加固
+
+- **行尾规范**：新增 `.gitattributes`，声明 `*.sh` / `*.msg` / `*.srv` / `*.action` / `*.params` 为 `eol=lf`，`*.bat` / `*.ps1` 为 `eol=crlf`。
+  起因是在本机工作区发现 4 个协作脚本 `.sh` 为 CRLF；用 `git ls-files --eol` 核实后确认**仓库内一直是 LF**，CRLF 由本机 `core.autocrlf=true` 在 checkout 时产生 —— 仓库内容无缺陷。
+  但风险真实存在：Window-E 要从 WSL 访问 Windows 工作区（`bash /mnt/c/...`），会拿到 CRLF 并报 `bad interpreter: /usr/bin/env bash^M`。`.gitattributes` 强制任何平台都得到 LF，已用 `git check-attr` 验证生效。
+  有意**不写** `* text=auto` —— 那会让现有 33 个 CRLF 的 Python 文件在下次 checkout 时全部重写，产生数千行无意义 diff
+
+### 本批次的事故记录
+
+- Kiro 重构工作副本目录时，`Move` 失败后紧随的 `Remove-Item -Recurse` 无条件执行，误删了本仓库的本地 clone。因是零本地修改的干净 clone，重新 clone 完全恢复，**无数据损失**。教训：不把清理动作链在可能失败的操作之后
 
 ---
 
@@ -316,9 +367,53 @@ Get-ChildItem E:\Users\Administrator\Desktop\gp\graduation_project\code\runs -Re
 > 按 `MULTI_WINDOW_PROTOCOL.md` §4.1 的标准格式。
 > 完成的 handoff **不删除**，加 ✅ 标记保留作审计轨迹。
 
+### ⏸ 待用户拍板的决策提请
+
+**[2026-07-27] 范围取舍：第三个检测场景 vs 真机闭环**
+
+`PROJECT_NORTH_STAR.md` 决策原则写着「广 vs 深取舍时**优先深**，但保证至少一个广度示例」。
+
+加入 `flight/` 后，两件事在时间上直接竞争：
+
+| 事项 | 类型 | 成本 |
+|---|---|---|
+| 「≥3 场景」的第三个场景（道路 / 屋顶） | 广 | 3-4 周（数据清洗 + 标注转换 + 训练） |
+| 真机飞行闭环 + 「视频→缺陷台账」管线 | 深 | 8-10 周 |
+
+**Kiro 的提请**：把第三个场景换成「真机闭环 + 视频→台账管线」。场景数 3→2（光伏 + 输电，仍满足「至少一个广度示例」）。
+
+**理由**：现有 `code/` 只做到「单张图检测出框」。从「出框」到「电站缺陷台账」之间的**组件跟踪、多帧关联、地理配准**才是「巡检平台」与「检测模型」的本质区别，也是论文里最容易做出第一手贡献的地方 —— 第三个场景给不了这个。参考实现 `PV-Hawk`（MIT，博士项目，完整管线）。
+
+**状态**：**未执行**。`MASTER_ARCHITECTURE.md` 的「≥3 场景」暂未修改，等用户决定。
+
+**[2026-07-27] 商业化路径是否保留**
+
+Ultralytics 是 AGPL-3.0，闭源商业化需购买其商业许可或替换检测框架。`PROJECT_NORTH_STAR.md` 写着「不是毕设，是一个事业起点」。若要保留商业化可能，需在 Q2 之前决定是否替换 Ultralytics。
+
+**状态**：当前按「完整开源 + AGPL-3.0」执行。若要改，越早越好。
+
 ### 紧急 Handoffs（< 24h 内必须处理）
 
-（无）
+**[2026-07-27] Window-E → 用户（硬件操作，Kiro 无法代做）**
+
+事项 1：**6C 首次上电与基线导出**（约 1 小时，不需要任何配件）
+1. 6C 插 USB，QGC 刷 **v1.17.0** 固件
+2. 选机架类型
+3. 全套校准：加速度计、水平、罗盘、遥控器
+4. 配失效保护参数（清单见 `flight/params/CHANGELOG.md` §本项目已规划的参数改动）
+5. 导出 `flight/params/pixhawk6c_bench_v1.params`
+6. 在 `flight/params/CHANGELOG.md` 登记
+
+价值：产出一份「已知良好」基线配置，之后任何改动都能 diff。硬件放着会积灰，配置基线做出来就是永久资产。
+
+事项 2：**WSL2 安装**（约 20 分钟，大部分是等待）
+```powershell
+wsl --install -d Ubuntu-22.04
+wsl --set-default Ubuntu-22.04
+# 建 C:\Users\Klara\.wslconfig，模板见 flight/sitl/bootstrap_wsl2.sh 附录
+wsl --shutdown
+```
+之后即可跑 `bash flight/sitl/bootstrap_wsl2.sh --check`。
 
 ### 本周 Handoffs
 
@@ -347,6 +442,7 @@ Get-ChildItem E:\Users\Administrator\Desktop\gp\graduation_project\code\runs -Re
 
 ## 16. 修改日志
 
+- 2026-07-27 Window-E: **飞控层落地**。新增 Window-E；4 项决策（AGPL-3.0 许可 / Gazebo 取代 AirSim / flight 归属 / 版本锁 v1.17.0）；接口契约包 `skylark_flight_msgs`（14 个接口，静态校验通过）；`dds_bandwidth.py` 算出默认 DDS 话题集占满 6C 串口 100.3%；三份实操文档 + WSL2 引导脚本；修复 4 个 `.sh` 的 CRLF 缺陷 + 新增 `.gitattributes`。详见 §9.1 与 `HARDWARE_FLIGHT_LAYER.md`
 - 2026-05-27 15:25 Window-A: 完成多窗口协作基础设施（MULTI_WINDOW_PROTOCOL.md + skill + steering + gpu_arbiter.py + Window-B 启动套件）
 - 2026-05-27 14:53 Window-A: 完成 MASTER_ARCHITECTURE.md 写作
 - 2026-05-27 12:39 Window-A: 完成 PROJECT_NORTH_STAR.md 写作
