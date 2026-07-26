@@ -17,10 +17,11 @@ Skylark 的第 5 个模块层。把 PX4 飞控接入平台，向 `edge/` 提供�
 | 1 | [`../HARDWARE_FLIGHT_LAYER.md`](../HARDWARE_FLIGHT_LAYER.md) | 架构增量提案。为什么要有这一层、三个边界契约、三阶段路线 |
 | 2 | [`VERSIONS.md`](VERSIONS.md) | 版本锁定。**所有版本号的唯一来源** |
 | 3 | [`MODULE_STATE.md`](MODULE_STATE.md) | 当前进度、已知事实、待办、风险 |
-| 4 | [`docs/WIRING_6C.md`](docs/WIRING_6C.md) | 接线。**动硬件前必读，开头三条红线会烧板子** |
-| 5 | [`docs/SERIAL_BUDGET.md`](docs/SERIAL_BUDGET.md) | 串口带宽。本层最大的架构约束 |
-| 6 | [`docs/SAFETY_CHECKLIST.md`](docs/SAFETY_CHECKLIST.md) | 飞行前检查单。**打印出来带到场地** |
-| 7 | [`ros2_ws/src/skylark_flight_msgs/`](ros2_ws/src/skylark_flight_msgs/) | 接口契约。先看 `action/*.action` |
+| 4 | [`sitl/WINDOWS_SETUP.md`](sitl/WINDOWS_SETUP.md) | **环境从这里开始。**需要管理员权限与重启的部分，Kiro 做不了 |
+| 5 | [`docs/WIRING_6C.md`](docs/WIRING_6C.md) | 接线。**动硬件前必读，开头三条红线会烧板子** |
+| 6 | [`docs/SERIAL_BUDGET.md`](docs/SERIAL_BUDGET.md) | 串口带宽。本层最大的架构约束 |
+| 7 | [`docs/SAFETY_CHECKLIST.md`](docs/SAFETY_CHECKLIST.md) | 飞行前检查单。**打印出来带到场地** |
+| 8 | [`ros2_ws/src/skylark_flight_msgs/`](ros2_ws/src/skylark_flight_msgs/) | 接口契约。先看 `action/*.action` |
 
 ---
 
@@ -110,15 +111,18 @@ on_detection:
 
 ## 快速上手
 
-### 第一步：环境（用户操作）
+### 第一步：环境（用户操作，需管理员 + 重启）
+
+完整步骤见 **[`sitl/WINDOWS_SETUP.md`](sitl/WINDOWS_SETUP.md)**。核心是一条命令：
 
 ```powershell
-# Windows PowerShell
-wsl --install -d Ubuntu-22.04
-wsl --set-default Ubuntu-22.04
-# 建 C:\Users\<你>\.wslconfig，见 bootstrap_wsl2.sh 附录
-wsl --shutdown
+# 以管理员身份运行 PowerShell
+wsl --install --no-launch -d Ubuntu-22.04
+# 然后重启电脑
 ```
+
+`.wslconfig` 已按本机硬件（31.3 GB 内存 / 16 核）生成于 `C:\Users\Klara\.wslconfig`，
+取值 memory=20GB / processors=12 / swap=8GB，不用手动建。
 
 ### 第二步：装依赖
 
