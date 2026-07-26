@@ -264,12 +264,28 @@ on_detection:
 | `LICENSE` | 新增（AGPL-3.0） | — | ✅ 已执行 |
 | `THIRD_PARTY_LICENSES.md` | 新增 | — | ✅ 已执行 |
 | `HARDWARE_FLIGHT_LAYER.md` | 新增（本文） | Window-B 追认 | ✅ 已执行 |
-| `MASTER_ARCHITECTURE.md` §6.1 | 仿真选型 AirSim → Gazebo Harmonic | Window-B | 待执行 |
-| `MASTER_ARCHITECTURE.md` §3.4 | 仓库组织增加 `flight/` | Window-B | 待执行 |
-| `.kiro/skills/.../references/windows.md` | 归属表增加 Window-E | 共享（需提案） | 待执行 |
-| `.kiro/steering/skylark-multi-window.md` | 铁律 1 归属表增加 `flight/**` | 共享（需提案） | 待执行 |
-| `STATE.md` | 登记 Window-E、机器分工、本次决策、handoff | 共享 | 待执行 |
-| `PROJECT_NORTH_STAR.md`「不做硬件层」 | **保留原文 + 追加变更批注** | Window-B | 待执行 |
+| `MASTER_ARCHITECTURE.md` §6.1 | 仿真选型 AirSim → Gazebo Harmonic（旧决策折叠保留） | Window-B | ✅ 已执行 |
+| `MASTER_ARCHITECTURE.md` §3.1 | C4 语境图：模糊占位符「无人机（大疆/PX4/AirSim）」→ 具体硬件栈 | Window-B | ✅ 已执行 |
+| `MASTER_ARCHITECTURE.md` §3.3 | 技术栈表：仿真改 Gazebo，新增「飞控」「飞控通信」两行 | Window-B | ✅ 已执行 |
+| `MASTER_ARCHITECTURE.md` §3.4 | 仓库组织增加 `flight/` | Window-B | ✅ 已执行 |
+| `MASTER_ARCHITECTURE.md` §2 §4 | 五维验收与 Q3 路线图（场景数、Q3-M9 重写） | Window-B | ✅ 已执行 |
+| `MASTER_ARCHITECTURE.md` §5 §8 | 风险点（AirSim 装机）与学习路径 M9 | Window-B | ✅ 已执行 |
+| `.kiro/skills/.../references/windows.md` | 归属表增加 Window-E + 独占清单 + 特殊约定 | 共享（需提案） | ✅ 已执行 |
+| `.kiro/skills/.../references/gpu-arbiter.md` | Q3 仿真不再参与 GPU 仲裁（跑在另一台机器） | 共享 | ✅ 已执行 |
+| `.kiro/skills/.../references/handoff.md` | 仿真集成协作场景改为 Window-E ↔ Window-C | 共享 | ✅ 已执行 |
+| `.kiro/steering/skylark-multi-window.md` | 铁律 1 归属表增加 `flight/**` + 机器分工 + 窗口识别 | 共享（需提案） | ✅ 已执行 |
+| `MULTI_WINDOW_PROTOCOL.md` | Window-D 职责去掉 AirSim 仿真 | Window-B | ✅ 已执行 |
+| `STATE.md` | Window-E 登记、机器分工、决策批次、handoff、修改日志、仿真选型 | 共享 | ✅ 已执行 |
+| `PROJECT_NORTH_STAR.md`「不做硬件层」 | **保留原文加删除线 + 追加变更批注** | Window-B | ✅ 已执行 |
+| `PROJECT_NORTH_STAR.md` 五条标准 | 场景数 3→2 + 视频→台账管线 | Window-B | ✅ 已执行 |
+| `WINDOW_D_KICKOFF.md` | 头部加「⚠ 2026-07-27 变更说明（启动前必读）」对照表 | Window-B | ⚠ 部分执行，见下 |
+
+> **⚠ `WINDOW_D_KICKOFF.md` 的遗留问题**：该文档正文（含要复制粘贴给新窗口的「启动语句」段）
+> 仍有 19 处 AirSim / `simulation/` / 「前端 + 仿真」的过时表述。已在头部加了权威变更对照表，
+> 但**正文未逐处改写** —— 它写于 2026-05-27，距实际启用（Q3，约 12 月）还有 5 个月，届时必然要整体重写。
+>
+> **已登记 handoff 给 Window-B**（见 `STATE.md` §待办交接）：Q3 启动 Window-D 之前必须重写该文档。
+> 在此之前，启动 Window-D 时**必须把头部变更说明一并粘贴**，否则新窗口会按过时职责范围干活。
 
 关于最后一条：北极星文档的价值在于**记录当时的判断**。不应该悄悄改掉历史判断假装从来没说过，而应该保留原文并标注「2026-07-27 变更，理由见 `HARDWARE_FLIGHT_LAYER.md` §1」。这是审计轨迹，也是诚实。
 
@@ -301,7 +317,7 @@ on_detection:
 
 ---
 
-## 12. 范围取舍提请（需用户拍板）
+## 12. 范围取舍 — ✅ 已由用户拍板执行（2026-07-27）
 
 `PROJECT_NORTH_STAR.md` 决策原则：
 
@@ -320,7 +336,22 @@ on_detection:
 
 **支撑理由**：现有 `code/` 只做到「单张图检测出框」。从「出框」到「电站缺陷台账」之间的**组件跟踪、多帧关联、地理配准**，才是「巡检平台」与「检测模型」的本质区别 —— 这恰好是论文里最容易做出第一手贡献的地方，也是第三个场景给不了的。参考实现：`PV-Hawk`（MIT，博士项目，完整管线）。
 
-**此项未执行，等用户决定。** `MASTER_ARCHITECTURE.md` 里的「≥3 场景」暂不修改。
+**✅ 已执行（2026-07-27，用户拍板）。** 同步修改的文件：
+
+| 文件 | 位置 | 改动 |
+|---|---|---|
+| `PROJECT_NORTH_STAR.md` | 五条衡量标准 §2 产品 | 「≥3 场景」→「≥2 场景 + 视频→台账管线」，附变更批注 |
+| `MASTER_ARCHITECTURE.md` | §2 五维验收表 | 同上 |
+| `MASTER_ARCHITECTURE.md` | §4 Q3-M7 | 第 3 个场景（RDD2022 道路病害）划掉 |
+| `MASTER_ARCHITECTURE.md` | §4 Q3-M9 | 整节重写：AirSim + 大疆 RTMP → 6C 真机闭环 + 视频→台账管线，归属移交 Window-E |
+| `MASTER_ARCHITECTURE.md` | §4 Q3 产出 | 「3 个检测场景」→「2 个检测场景 + 真机闭环 + 台账管线」 |
+| `STATE.md` | §2 五维当前状态 / §9 平台路径 / 待决策段 | 同步 |
+| `WINDOW_D_KICKOFF.md` | 启动前检查 / Q3 期望产出 / 归属 | 场景数改 2；`simulation/` 移交 Window-E |
+| `flight/MODULE_STATE.md` | §7 风险与决策 | 「未决」→ 已决 |
+
+**腾出的 3-4 周去向**：投入 `flight/` 的 S3 真机阶段与「视频→缺陷台账」管线。
+两者合计仍需 8-10 周，因此 Q3 的实际压力**没有减小** —— 这次取舍换的是**深度**，不是工期。
+这一点必须说清楚，否则会误以为"少做一个场景就轻松了"。
 
 ---
 

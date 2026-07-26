@@ -185,5 +185,5 @@ def main():
 |---|---|
 | 现在（M1） | Lock 仅 Window-A 用（C/D 还没开） |
 | Q2（M5 Jetson 接入） | Jetson GPU 不冲突 5060 Ti，但 5060 Ti 上的 benchmark 进入 Lock 队列 |
-| Q3（仿真上线） | AirSim 占 GPU 渲染，但用 iGPU 不影响 NV 卡（如有） |
+| Q3（仿真上线） | ~~AirSim 占 GPU 渲染~~ → **不再涉及**。仿真改为 Gazebo Harmonic 且跑在 `METAMECHBOOK01`（AMD GPU，另一台机器），与 ML 训练机物理隔离，**不参与 GPU 仲裁** |
 | Q4 | 评估是否升级到 Redis-based lock（如果出现真并行需求） |

@@ -5,6 +5,28 @@
 
 ---
 
+## ⚠ 2026-07-27 变更说明（启动前必读）
+
+本文档写于 2026-05-27，之后项目做了两次调整，**下文尚有部分内容过时**。启动 Window-D 时按本节修正：
+
+| 原文内容 | 现状 |
+|---|---|
+| Window-D = **前端 + 仿真** | Window-D = **纯前端**。`simulation/**` 已移交 **Window-E**（飞控 + 仿真），并入 `flight/sitl/` |
+| 仿真用 **AirSim** | 改用 **Gazebo Harmonic LTS**。AirSim 与其主要 fork Colosseum 均已被归档；且飞控开发机是 AMD GPU，AirSim / Isaac Sim 都跑不了 |
+| Q3-M9 任务 E/F（AirSim 集成、演示视频） | 移交 Window-E。Window-D 只保留「实时图传 → 前端 WebSocket 展示」部分 |
+| **≥ 3 个检测场景** | **≥ 2 个场景（光伏 + 输电）**。第三个场景换成了「真机闭环 + 视频→缺陷台账管线」 |
+| 启动前检查第 5 项「是否采购无人机（大疆）」 | 作废。已购入 **Holybro Pixhawk 6C**，走自建机路线，归 Window-E |
+| 归属清单含 `simulation/**` | 删除该项 |
+
+**权威依据**：`HARDWARE_FLIGHT_LAYER.md`（架构增量提案）+ `STATE.md` §9.1 决策批次 +
+`.kiro/skills/skylark-coordination/references/windows.md`（归属表已更新）。
+
+**启动 Window-D 时，把本节一并粘贴给它**，否则它会按过时的职责范围干活。
+
+原文以下内容保留不删，作审计轨迹。
+
+---
+
 ## 启动前的检查（你做）
 
 启动 Window-D 之前，必须确认 Window-A、B、C 已完成以下事项：
@@ -63,7 +85,8 @@
 
 【第 3 步：在 STATE.md 注册自己】
 在 STATE.md §"活跃窗口"段加一行：
-- Window-D（前端 + 仿真）：YYYY-MM-DD HH:MM 上线，专注 Q3 平台前端 + AirSim 仿真
+- Window-D（**前端**）：YYYY-MM-DD HH:MM 上线，专注 Q3 平台前端
+  （注：仿真已于 2026-07-27 移交 Window-E，见本文头部变更说明）
 
 把 Window-D 的"上线时间"从"⏳ Q3 起"改为实际时间。
 
@@ -97,7 +120,9 @@ D. M8 第 3-4 周 — 多场景路由 UX
    - 不同场景的检测结果展示样式（类别图标 / 缺陷描述 / 严重等级）
    - 多场景模型注册系统的前端表现层（与 Window-C 协作）
 
-E. M9 第 1-2 周 — AirSim 仿真集成
+E. M9 第 1-2 周 — ~~AirSim 仿真集成~~ 【已移交 Window-E，本段作废】
+   2026-07-27 起仿真归 Window-E，改用 Gazebo Harmonic。你只保留 F 段的
+   「实时图传 → 前端 WebSocket 展示」部分。以下 E 段内容保留作审计轨迹，不要执行。
    - 装 AirSim（Unreal Engine 4.27 + AirSim Plugin）
    - 写 simulation/airsim/client.py（Python API 控制无人机 + 抓帧）
    - 写 simulation/scenarios/（光伏屋顶 / 输电线路场景脚本）
@@ -120,8 +145,9 @@ F. M9 第 3-4 周 — 实时图传 + 演示视频
 
 文件归属（独占）：
 - platform/frontend/**
-- simulation/**
 - docs/demo/**（演示视频脚本、镜头分镜、配音文案）
+- 注：simulation/** 已于 2026-07-27 移交 Window-E（并入 flight/sitl/），不再属于你
+- 注：flight/** 属于 Window-E，你不可编辑
 
 不允许编辑：
 - code/**（Window-A 独占）
@@ -200,7 +226,7 @@ Q3 启动前应到位的硬件（按推荐度）：
 
 到 M9 末（约 2 月底）应该交付：
 ✅ Skylark Web 平台真实在线（注册登录可用）
-✅ ≥ 3 个检测场景支持（光伏 + 输电 + 道路 / 屋顶任二）
+✅ **≥ 2 个检测场景支持（光伏 + 输电）** ← 2026-07-27 从 3 改为 2，见下方变更说明
 ✅ 异步推理 + 进度实时推送
 ✅ 缺陷地图（Leaflet）+ 报告 PDF 下载
 ✅ AirSim 仿真演示（虚拟光伏屋顶 + 自主飞行 + 实时检出）

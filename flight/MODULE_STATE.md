@@ -117,4 +117,7 @@
   但这仍是**实际风险**：从 WSL 访问 Windows 工作区（`bash /mnt/c/.../status.sh`）会拿到 CRLF 版本并报 `bad interpreter: /usr/bin/env bash^M`。Window-E 正好要这么用。
   处置：新增 `.gitattributes` 声明 `*.sh text eol=lf`，强制任何平台 checkout 都得到 LF。已用 `git check-attr` 与 `git ls-files --eol` 验证生效（`i/lf w/lf attr/text eol=lf`）。
   初判「已存在的 bug」不准确，此处更正留档
-- [2026-07-27] **未决**：`HARDWARE_FLIGHT_LAYER.md` §12 的范围取舍提请（第三个检测场景 vs 真机闭环 + 视频→台账管线）。按 `PROJECT_NORTH_STAR.md`「广 vs 深优先深」原则应选后者，但涉及 `MASTER_ARCHITECTURE.md` 的「≥3 场景」承诺，等用户拍板
+- [2026-07-27] **决策（已由用户拍板）**：范围取舍执行 —— 第三个检测场景（道路/屋顶）换成「真机飞行闭环 + 视频→缺陷台账管线」。场景数 3→2（光伏 + 输电）。
+  依据 `PROJECT_NORTH_STAR.md`「广 vs 深优先深，但保证至少一个广度示例」原则。已同步修改 8 处文档，清单见 `HARDWARE_FLIGHT_LAYER.md` §12。
+  **对本模块的影响**：S3 真机阶段从「加分项」升级为**验收硬指标**，Q3-M9 的归属从 Window-D 移交本模块。
+  **必须记住**：换的是深度不是工期 —— 腾出的 3-4 周被真机 + 台账管线（8-10 周）吸收，Q3 压力未减

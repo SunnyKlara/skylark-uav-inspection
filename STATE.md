@@ -75,7 +75,7 @@
 | 维度 | 当前 | 终态 |
 |---|---|---|
 | 论文（理论） | 30% | 中文优秀 + SCI 投出 + ≥1 处第一手发现 + 0 注水 |
-| 产品（实践） | 0% | Web 平台真在线 + ≥3 场景 + GitHub 开源 |
+| 产品（实践） | 0% | Web 平台真在线 + **≥2 场景（光伏 + 输电）** + **视频→缺陷台账管线** + GitHub 开源 |
 | 软硬协同 | 5% | Jetson 真机 + INT8/TRT + 仿真 + 演示视频 |
 | 工程质量 | 20% | pytest 60%+ + CI/CD + Docker + 文档 |
 | 个人能力 | ML 已掌握 | + Web 全栈 + 边缘 AI + 产品思维 |
@@ -238,7 +238,8 @@ PDF 重编：✅ main.pdf 202KB / main_zh.pdf 312KB
 - E4: 训练预算扫描（ours @ 100ep / 300ep）
 
 ### 仿真选型
-- AirSim（Unreal）— 视觉真实、文献多、可在 Q3 末做演示
+- ~~AirSim（Unreal）— 视觉真实、文献多、可在 Q3 末做演示~~
+- **2026-07-27 变更为 Gazebo Harmonic LTS**。AirSim 及其主要 fork Colosseum 均已归档；且飞控开发机是 AMD GPU，AirSim/Isaac Sim 都跑不了。详见 `HARDWARE_FLIGHT_LAYER.md` §2.2
 
 ### 论文叙事
 - **不寻求绝对 SOTA**
@@ -248,7 +249,7 @@ PDF 重编：✅ main.pdf 202KB / main_zh.pdf 312KB
 ### 平台路径
 - ~~不做飞控层（用大疆 SDK 或仿真替代）~~ → **2026-07-27 变更**：已购入 Pixhawk 6C，新增 `flight/` 层。见下方「2026-07-27 决策批次」
 - 不追求工业级可商用，做"作品级"
-- 多场景 ≥ 3（光伏 + 输电 + 道路 / 屋顶 / 桥梁任二）→ ⏸ **有取舍提请待拍板**，见 §待决策
+- ~~多场景 ≥ 3（光伏 + 输电 + 道路 / 屋顶 / 桥梁任二）~~ → **2026-07-27 变更为 ≥2 场景（光伏 + 输电）+ 视频→缺陷台账管线 + 真机闭环**。依据北极星「广 vs 深优先深」原则，见 `HARDWARE_FLIGHT_LAYER.md` §12
 
 ---
 
@@ -367,9 +368,9 @@ Get-ChildItem E:\Users\Administrator\Desktop\gp\graduation_project\code\runs -Re
 > 按 `MULTI_WINDOW_PROTOCOL.md` §4.1 的标准格式。
 > 完成的 handoff **不删除**，加 ✅ 标记保留作审计轨迹。
 
-### ⏸ 待用户拍板的决策提请
+### ✅ 已拍板的决策（2026-07-27 批次二）
 
-**[2026-07-27] 范围取舍：第三个检测场景 vs 真机闭环**
+**[2026-07-27] ✅ 范围取舍：第三个检测场景 → 真机闭环 + 视频→台账管线**
 
 `PROJECT_NORTH_STAR.md` 决策原则写着「广 vs 深取舍时**优先深**，但保证至少一个广度示例」。
 
@@ -380,11 +381,16 @@ Get-ChildItem E:\Users\Administrator\Desktop\gp\graduation_project\code\runs -Re
 | 「≥3 场景」的第三个场景（道路 / 屋顶） | 广 | 3-4 周（数据清洗 + 标注转换 + 训练） |
 | 真机飞行闭环 + 「视频→缺陷台账」管线 | 深 | 8-10 周 |
 
-**Kiro 的提请**：把第三个场景换成「真机闭环 + 视频→台账管线」。场景数 3→2（光伏 + 输电，仍满足「至少一个广度示例」）。
+**决定**：第三个场景换成「真机闭环 + 视频→台账管线」。场景数 **3 → 2**（光伏 + 输电，仍满足「至少一个广度示例」）。
 
 **理由**：现有 `code/` 只做到「单张图检测出框」。从「出框」到「电站缺陷台账」之间的**组件跟踪、多帧关联、地理配准**才是「巡检平台」与「检测模型」的本质区别，也是论文里最容易做出第一手贡献的地方 —— 第三个场景给不了这个。参考实现 `PV-Hawk`（MIT，博士项目，完整管线）。
 
-**状态**：**未执行**。`MASTER_ARCHITECTURE.md` 的「≥3 场景」暂未修改，等用户决定。
+**⚠ 必须说清的一点**：这次取舍换的是**深度，不是工期**。腾出的 3-4 周被真机 + 台账管线（合计 8-10 周）吸收，**Q3 的实际压力没有减小**。不要误以为"少做一个场景就轻松了"。
+
+**已同步修改的文件**（8 处，清单见 `HARDWARE_FLIGHT_LAYER.md` §12）：
+`PROJECT_NORTH_STAR.md` 五条标准 / `MASTER_ARCHITECTURE.md` §2 §4(Q3-M7, Q3-M9, Q3产出) / `STATE.md` §2 §9 / `WINDOW_D_KICKOFF.md` / `flight/MODULE_STATE.md`
+
+### ⏸ 仍待拍板的决策提请
 
 **[2026-07-27] 商业化路径是否保留**
 
@@ -420,6 +426,22 @@ wsl --shutdown
 （无 — Window-B 尚未上线）
 
 ### Q1 内 Handoffs
+
+- [2026-07-27] **Window-E → Window-B**（Q3 启动 Window-D 之前必须处理）
+  事项：**重写 `WINDOW_D_KICKOFF.md`**
+  原因：该文档写于 2026-05-27，2026-07-27 的架构变更使其正文过时 —— 正文（含要复制粘贴给新窗口的「启动语句」段）仍有约 19 处 AirSim / `simulation/` / 「前端 + 仿真」/「3 个场景」的表述
+  已做的：头部加了「⚠ 2026-07-27 变更说明（启动前必读）」权威对照表；修了 3 处最会误导的角色定义（自我注册行、文件归属清单、M9-E 段作废标记）
+  未做的：正文其余部分未逐处改写。判断是届时必然整体重写，逐处修补是浪费
+  **风险**：在重写完成前，启动 Window-D 时**必须把头部变更说明一并粘贴**，否则新窗口会按过时职责范围干活（去装 AirSim、去训第三个场景模型、去改 `simulation/`）
+  期望产出：Q3 启动前一份与当时架构一致的 Window-D 启动套件
+  紧急度：Q3 前（约 12 月），不紧急但不可遗漏
+
+- [2026-07-27] **Window-E → Window-B**（本周内）
+  事项：追认 `HARDWARE_FLIGHT_LAYER.md`，并校对本次对 `PROJECT_NORTH_STAR.md` / `MASTER_ARCHITECTURE.md` / `MULTI_WINDOW_PROTOCOL.md` 的修改
+  文件：`HARDWARE_FLIGHT_LAYER.md`、`THIRD_PARTY_LICENSES.md`、`PROJECT_NORTH_STAR.md`、`MASTER_ARCHITECTURE.md`、`MULTI_WINDOW_PROTOCOL.md`
+  说明：项目根 `*.md` 归 Window-B，本次由 Window-E 越权修改（用户已授权执行）。按协议在此留痕
+  期望产出：B 通读后在本条末尾标 ✅，或指出需修正处
+  紧急度：本周
 
 - [2026-05-27 15:00] Window-A → Window-B（待 B 上线后处理）
   事项：5 处理论硬伤已修，请校对一遍
