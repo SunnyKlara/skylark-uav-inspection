@@ -42,8 +42,23 @@
 | 备选 | 优点 | 未选原因 |
 |---|---|---|
 | v1.16.2 | 有 2 轮补丁，更保守 | AAS 的代码引用需做 msg 版本适配，得不偿失 |
-| v1.18.0 | 最新 stable | 太新，社区踩坑经验少；AAS 未跟进 |
+| v1.18.0 | — | **它还不是 stable**，只到 beta1（见下方更正） |
 | main | 有最新特性 | 毕设期间追 main 是自找麻烦。明文禁止 |
+
+> ⚠ **2026-07-27 更正**：本表原先写「v1.18.0 = 最新 stable」，**这是错的**。
+> 该说法源自误读 PX4 文档 `releases/release_process.md` 里的流程示例表格（那是模板，不是实际发布状态）。
+>
+> 经 GitHub API 核实的实际状态：
+>
+> | 事实 | 核实方式 |
+> |---|---|
+> | `releases/latest` = **v1.17.0**（2026-05-13） | `gh api repos/PX4/PX4-Autopilot/releases/latest` |
+> | `stable` 分支指向的 tag = **v1.17.0** | `gh api .../git/ref/heads/stable` + tag 比对 |
+> | v1.18.0 最新只到 **v1.18.0-beta1**（2026-07-08，prerelease） | releases 列表 |
+>
+> **有利的后果**：v1.17.0 既是我们锁定的版本，又正好是当前 stable。
+> 所以 QGroundControl 里默认的「PX4 Pro Stable Release」刷的就是它 ——
+> 刷固件不需要手动下载文件，也不需要动 Advanced settings。见 `docs/FLASH_AND_CALIBRATE_6C.md`。
 
 ---
 

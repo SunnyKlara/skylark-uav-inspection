@@ -17,11 +17,12 @@ Skylark 的第 5 个模块层。把 PX4 飞控接入平台，向 `edge/` 提供�
 | 1 | [`../HARDWARE_FLIGHT_LAYER.md`](../HARDWARE_FLIGHT_LAYER.md) | 架构增量提案。为什么要有这一层、三个边界契约、三阶段路线 |
 | 2 | [`VERSIONS.md`](VERSIONS.md) | 版本锁定。**所有版本号的唯一来源** |
 | 3 | [`MODULE_STATE.md`](MODULE_STATE.md) | 当前进度、已知事实、待办、风险 |
-| 4 | [`sitl/WINDOWS_SETUP.md`](sitl/WINDOWS_SETUP.md) | **环境从这里开始。**需要管理员权限与重启的部分，Kiro 做不了 |
-| 5 | [`docs/WIRING_6C.md`](docs/WIRING_6C.md) | 接线。**动硬件前必读，开头三条红线会烧板子** |
-| 6 | [`docs/SERIAL_BUDGET.md`](docs/SERIAL_BUDGET.md) | 串口带宽。本层最大的架构约束 |
-| 7 | [`docs/SAFETY_CHECKLIST.md`](docs/SAFETY_CHECKLIST.md) | 飞行前检查单。**打印出来带到场地** |
-| 8 | [`ros2_ws/src/skylark_flight_msgs/`](ros2_ws/src/skylark_flight_msgs/) | 接口契约。先看 `action/*.action` |
+| 4 | [`docs/FLASH_AND_CALIBRATE_6C.md`](docs/FLASH_AND_CALIBRATE_6C.md) | **硬件从这里开始。**刷固件 + 校准 + 导出基线，逐步照做，只需飞控 + USB 线 |
+| 5 | [`sitl/WINDOWS_SETUP.md`](sitl/WINDOWS_SETUP.md) | **软件环境从这里开始。**需要管理员权限与重启的部分，Kiro 做不了 |
+| 6 | [`docs/WIRING_6C.md`](docs/WIRING_6C.md) | 接线。**接线前必读，开头三条红线会烧板子** |
+| 7 | [`docs/SERIAL_BUDGET.md`](docs/SERIAL_BUDGET.md) | 串口带宽。本层最大的架构约束 |
+| 8 | [`docs/SAFETY_CHECKLIST.md`](docs/SAFETY_CHECKLIST.md) | 飞行前检查单。**打印出来带到场地** |
+| 9 | [`ros2_ws/src/skylark_flight_msgs/`](ros2_ws/src/skylark_flight_msgs/) | 接口契约。先看 `action/*.action` |
 
 ---
 
@@ -56,6 +57,7 @@ flight/
 │   └── dds_bandwidth.py     ✅ 串口带宽估算器
 │
 └── docs/
+    ├── FLASH_AND_CALIBRATE_6C.md  ✅ 刷固件与校准，逐步操作指导
     ├── WIRING_6C.md         ✅ 分体式接线
     ├── SERIAL_BUDGET.md     ✅ 带宽预算
     └── SAFETY_CHECKLIST.md  ✅ 飞行安全检查单
