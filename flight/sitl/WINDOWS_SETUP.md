@@ -18,62 +18,65 @@
 
 ---
 
-## 第 1 步：装 WSL2 + Ubuntu 22.04
+## 第 1-3 步：✅ 已完成（2026-07-27，Kiro 代做）
 
-**以管理员身份**打开 PowerShell（开始菜单搜 PowerShell → 右键 → 以管理员身份运行），执行：
+**本机已全部装好，第 1-3 步可跳过。** 而且有个意外收获：**没有重启 Windows**。
+
+### 实际执行与结果
+
+| 项 | 结果 |
+|---|---|
+| `VirtualMachinePlatform` | **本来就已启用**（省了一半工作） |
+| `Microsoft-Windows-Subsystem-Linux` | Disabled → **Enabled**（带 `-NoRestart`，未自动重启） |
+| WSL 版本 | **2.7.11.0**，内核 `6.18.33.2-microsoft-standard-WSL2` |
+| WSLg | **1.0.73.2**（图形支持在，Gazebo 界面可用） |
+| Direct3D 层 | `1.611.1`（AMD 显卡在 WSL 里的加速通道） |
+| 发行版 | **Ubuntu 22.04.5 LTS**，VERSION=**2** |
+| Linux 用户 | `klara`（uid 1000），已设为默认登录用户 |
+| 用户组 | `sudo adm dialout video plugdev` |
+| sudo | 已配 NOPASSWD |
+| systemd | **running**（PID 1 = systemd） |
+| `.wslconfig` 生效 | ✅ `nproc`=12、内存 19Gi、swap 8.0Gi，与配置一致 |
+
+### 为什么不用重启 Windows
+
+`Microsoft-Windows-Subsystem-Linux` 这个可选功能主要服务 **WSL1**。
+本项目只需要 **WSL2**，而 WSL2 依赖的是 `VirtualMachinePlatform` —— 那个在本机**原本就已启用**。
+
+所以现在的状态是：
+- ✅ WSL2 完全可用，Ubuntu 22.04 已在跑
+- ⚠️ WSL1 暂不可用（`wsl --status` 会提示「当前计算机配置不支持 WSL1」）—— **不影响本项目**
+- 系统有待重启标记，但**你可以在任何方便的时候重启**，不必为了继续工作而重启
+
+### 两处踩坑与修正（已修，记录备查）
+
+**坑 1：`.wslconfig` 里两个键放错了段。**
+`autoMemoryReclaim` 与 `sparseVhd` 原先被放在 `[wsl2]` 段，WSL 2.7.11 启动时报
+「`wsl2.autoMemoryReclaim ... 未知`」「`wsl2.sparseVhd ... 未知`」。
+这两个键属于 **`[experimental]`** 段。已移正，警告消失。
+
+**坑 2：账号创建用非交互方式，避免阻塞。**
+安装时用了 `--no-launch`，所以首次运行的交互式建账号流程没跑。
+改为 `useradd` 非交互创建，并把密码留空（锁定）+ 配置 NOPASSWD sudo。
+
+> **关于 NOPASSWD sudo 的安全性**：在 WSL 下这不降低安全性 —— 任何能在 Windows 上执行
+> `wsl -u root` 的人本来就已经能无密码拿到 root。想设密码随时 `sudo passwd klara`。
+
+`dialout` 组是有意加的（以后接 6C 串口要用），`video` 组也是（Gazebo 渲染要用）。
+
+### 换机器时怎么重做
 
 ```powershell
-wsl --install --no-launch -d Ubuntu-22.04
+# 管理员 PowerShell
+wsl --install --no-launch -d Ubuntu-22.04    # --no-launch 避免弹交互式建账号提示
+# 若 VirtualMachinePlatform 未启用，此步之后需要重启 Windows
+
+# 非管理员，创建账号（把 klara 换成你的名字）
+wsl -d Ubuntu-22.04 -u root -- useradd -m -s /bin/bash -G sudo,adm,dialout,plugdev,video klara
+wsl -d Ubuntu-22.04 -u root -- bash -c 'echo "klara ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-skylark-klara && chmod 0440 /etc/sudoers.d/90-skylark-klara'
+wsl -d Ubuntu-22.04 -u root -- bash -c 'printf "[user]\ndefault=klara\n\n[boot]\nsystemd=true\n" > /etc/wsl.conf'
+wsl --shutdown
 ```
-
-`--no-launch` 是有意的：让它只安装不启动，避免安装过程中弹出交互式的账号创建提示。
-
-这一步会自动启用两个 Windows 功能（`Microsoft-Windows-Subsystem-Linux` 与
-`VirtualMachinePlatform`），然后下载 Ubuntu 22.04（约 500 MB）。
-
-### 然后重启电脑
-
-启用 Windows 功能必须重启才生效。这一步不能跳。
-
----
-
-## 第 2 步：创建 Linux 账号
-
-重启后，普通（非管理员）PowerShell 里执行：
-
-```powershell
-wsl
-```
-
-首次进入会提示创建账号：
-
-```
-Enter new UNIX username:   ← 建议就用 klara（全小写，Linux 习惯）
-New password:              ← 输入时不显示字符，正常现象
-Retype new password:
-```
-
-这个密码是 WSL 内部 `sudo` 用的，与 Windows 账号无关。**记住它**，后面装依赖要用。
-
----
-
-## 第 3 步：确认 `.wslconfig` 生效
-
-```powershell
-exit                  # 退出 WSL
-wsl --shutdown        # 关闭 WSL 虚拟机，让 .wslconfig 生效
-wsl                   # 重新进入
-```
-
-进去之后验证：
-
-```bash
-free -h    # 应显示约 20 GB 内存（不是 31 GB）
-nproc      # 应显示 12（不是 16）
-```
-
-对不上说明 `.wslconfig` 没生效，检查文件路径是否为 `C:\Users\Klara\.wslconfig`
-且**没有扩展名**（Windows 资源管理器可能隐藏了 `.txt`）。
 
 ---
 
@@ -183,9 +186,45 @@ IDE 编辑、git 操作也在 Windows 侧统一管理。
 | `free -h` 显示 31 GB | `.wslconfig` 没生效。确认路径 `C:\Users\Klara\.wslconfig` 且无 `.txt` 扩展名，然后 `wsl --shutdown` |
 | `xclock` 不弹窗 | WSLg 异常。`wsl --update` 然后 `wsl --shutdown` |
 | `colcon build` 报 empy 错误 | `pip install -U 'empy==3.3.4'`。PX4 对 empy 版本敏感，3.4+ 会失败 |
+| **apt 报 `packages.ros.org` 证书主机名不匹配** | **上游服务端问题，非本机故障。** `bootstrap_wsl2.sh` 已自动把 ROS 源改成 `http://` 绕过，见下方说明 |
 | `colcon build` 被 OOM kill | `colcon build --parallel-workers 1`，或提高 `.wslconfig` 的 `memory` |
 | 脚本报 `bad interpreter: ...^M` | 行尾问题。仓库已加 `.gitattributes` 强制 `*.sh` 为 LF，若仍出现执行 `dos2unix <文件>` |
 | WSL 占用磁盘一直涨 | `.wslconfig` 已开 `sparseVhd=true`。手动回收：`wsl --shutdown` 后用 `diskpart` 的 `compact vdisk` |
+
+---
+
+## 已知的上游问题：`packages.ros.org` 证书主机名不匹配
+
+2026-07-27 实测发现，记录在此以免日后误判为本机故障。
+
+**现象**：
+
+```
+curl: (60) SSL: no alternative certificate subject name matches target host name 'packages.ros.org'
+```
+
+**实测数据**（Windows 侧与 WSL 侧结果完全一致，故排除 WSL 特有因素）：
+
+| 项 | 值 |
+|---|---|
+| 收到的证书 subject | `CN=*.osuosl.org, O=Oregon State University, S=Oregon, C=US` |
+| 证书 issuer | `CN=InCommon RSA Server CA 2, O=Internet2, C=US` |
+| 证书 SAN | 仅 `*.osuosl.org`、`osuosl.org` —— **不含 `packages.ros.org`** |
+| 证书有效期 | 2025-07-17 ~ 2026-08-18（证书本身有效，只是主机名不匹配） |
+| `http://packages.ros.org/ros2/ubuntu/dists/jammy/InRelease` | **HTTP 200，可达** |
+
+OSUOSL（俄勒冈州立大学开源实验室）是 ROS 软件源的**合法官方托管方**，所以我们连到的是
+真服务器，只是它对 `packages.ros.org` 这个主机名没有配对应证书。**这是服务端配置问题。**
+
+**处置**：`bootstrap_wsl2.sh` 会自动把 ROS apt 源从 `https://` 改成 `http://`。
+
+**为什么用 http 是安全的**：
+
+apt 的完整性保障来自 `InRelease` 文件的 **GPG 签名**（密钥来自官方 `ros2-apt-source` 包），
+不是来自 TLS。TLS 在这里只提供**保密性**（隐藏「你在下载哪些包」），不提供完整性。
+被篡改的包会因签名校验失败而被 apt 拒绝安装。Debian/Ubuntu 官方源默认也是 http，原理相同。
+
+**若上游修好了**：把 `bootstrap_wsl2.sh` 里那段 `sed` 改 http 的循环删掉即可（脚本内有注释标注）。
 
 ---
 

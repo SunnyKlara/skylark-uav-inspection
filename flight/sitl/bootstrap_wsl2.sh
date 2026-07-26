@@ -130,18 +130,70 @@ if [[ "$SKIP_PX4" == true ]]; then
   step "跳过 PX4（--skip-px4）"
 else
   step "PX4-Autopilot ${PX4_VERSION}"
+
+  # git 传输加固。
+  # 实测（2026-07-27）本机到 github.com 的链路不稳定，一次性递归 clone（1.5-2 GB）
+  # 反复失败于 "GnuTLS recv error (-54)" / "fetch-pack: unexpected disconnect"。
+  # 所以：① 调大缓冲、去掉低速中断；② 主仓库与子模块分两步，各自可重试可续传。
+  git config --global http.postBuffer 524288000
+  git config --global http.lowSpeedLimit 0
+  git config --global http.lowSpeedTime 999999
+  git config --global core.compression 0   # 降 CPU 换稳定，减少长时间无数据导致的断流
+
+  # ---- 第 1 步：主仓库（不含子模块），可重试 ----
   if [[ -d "${PX4_DIR}/.git" ]]; then
     CURRENT_TAG="$(git -C "$PX4_DIR" describe --tags --exact-match 2>/dev/null || echo '<非 tag>')"
-    ok "已存在，当前: ${CURRENT_TAG}"
+    ok "主仓库已存在，当前: ${CURRENT_TAG}"
     if [[ "$CURRENT_TAG" != "$PX4_VERSION" ]]; then
-      warn "版本与 VERSIONS.md 锁定的 ${PX4_VERSION} 不一致"
-      warn "如需切换: git -C ${PX4_DIR} fetch --tags && git -C ${PX4_DIR} checkout ${PX4_VERSION} && git -C ${PX4_DIR} submodule update --init --recursive"
+      warn "版本与 VERSIONS.md 锁定的 ${PX4_VERSION} 不一致，尝试切换"
+      git -C "$PX4_DIR" fetch --tags --force || warn "fetch tags 失败"
+      git -C "$PX4_DIR" checkout "$PX4_VERSION" || warn "checkout ${PX4_VERSION} 失败"
     fi
   else
-    echo "  clone（递归，含子模块，约 1.5-2 GB，视网络需 5-20 分钟）..."
-    git clone --recursive --branch "$PX4_VERSION" \
-      https://github.com/PX4/PX4-Autopilot.git "$PX4_DIR"
-    ok "clone 完成"
+    echo "  clone 主仓库（不含子模块，约 400-600 MB）..."
+    CLONED=0
+    for attempt in 1 2 3 4 5; do
+      echo "    尝试 ${attempt}/5 ..."
+      if [[ -d "${PX4_DIR}/.git" ]]; then
+        # 上次留下了不完整的仓库 -> 续传而不是重来
+        if git -C "$PX4_DIR" fetch --tags origin "$PX4_VERSION" 2>&1 \
+           && git -C "$PX4_DIR" checkout "$PX4_VERSION" 2>&1; then
+          CLONED=1; break
+        fi
+      else
+        if git clone --branch "$PX4_VERSION" \
+             https://github.com/PX4/PX4-Autopilot.git "$PX4_DIR" 2>&1; then
+          CLONED=1; break
+        fi
+      fi
+      warn "    第 ${attempt} 次未成功，10 秒后重试（已下载部分会保留续传）"
+      sleep 10
+    done
+    if [[ "$CLONED" != 1 ]]; then
+      die "主仓库 clone 5 次均失败。网络到 github.com 不稳定。
+     可稍后重跑本脚本（幂等，会自动续传），或手动执行：
+       git clone --branch ${PX4_VERSION} https://github.com/PX4/PX4-Autopilot.git ${PX4_DIR}"
+    fi
+    ok "主仓库 clone 完成"
+  fi
+
+  # ---- 第 2 步：子模块，逐个可重试（单个失败不至于全盘重来）----
+  step "PX4 子模块"
+  SUBMOD_OK=0
+  for attempt in 1 2 3 4 5 6; do
+    echo "  子模块同步 尝试 ${attempt}/6 ..."
+    if git -C "$PX4_DIR" submodule update --init --recursive --jobs 4 2>&1; then
+      SUBMOD_OK=1; break
+    fi
+    warn "  第 ${attempt} 次未完成，10 秒后重试（已完成的子模块会跳过）"
+    sleep 10
+  done
+  if [[ "$SUBMOD_OK" == 1 ]]; then
+    ok "子模块全部就绪"
+  else
+    warn "子模块未全部完成。可重跑本脚本续传，或手动："
+    warn "  git -C ${PX4_DIR} submodule update --init --recursive"
+    warn "编译固件需要子模块完整；仅跑 SITL 也需要部分子模块。"
   fi
 
   step "PX4 工具链 + Gazebo Harmonic"
@@ -164,12 +216,51 @@ step "ROS 2 ${ROS_DISTRO_NAME}"
 if [[ -f "/opt/ros/${ROS_DISTRO_NAME}/setup.bash" ]]; then
   ok "已安装"
 else
-  echo "  添加 ROS 2 apt 源..."
-  sudo curl -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
-    -o /usr/share/keyrings/ros-archive-keyring.gpg
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
-http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo "$UBUNTU_CODENAME") main" \
-    | sudo tee /etc/apt/sources.list.d/ros2.list >/dev/null
+  # ---- ROS 2 apt 源 ----
+  # 用官方的 ros2-apt-source .deb（现行推荐方式，自带正确的 GPG 密钥与源定义），
+  # 取代早年手动下 ros.key + 写 sources.list 的做法。
+  echo "  添加 ROS 2 apt 源（官方 ros2-apt-source .deb）..."
+  ROS_APT_VER="$(curl -fsSL https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest \
+                 | grep -oP '"tag_name":\s*"\K[^"]+' || echo '1.2.0')"
+  CODENAME="$(. /etc/os-release && echo "$UBUNTU_CODENAME")"
+  DEB="/tmp/ros2-apt-source.deb"
+  if curl -fsSL -o "$DEB" \
+      "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_VER}/ros2-apt-source_${ROS_APT_VER}.${CODENAME}_all.deb"; then
+    sudo apt-get install -y "$DEB" >/dev/null
+    ok "ros2-apt-source ${ROS_APT_VER} (${CODENAME}) 已安装"
+  else
+    warn "官方 .deb 下载失败，回退到手动添加源"
+    sudo curl -fsSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+      -o /usr/share/keyrings/ros-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+http://packages.ros.org/ros2/ubuntu ${CODENAME} main" \
+      | sudo tee /etc/apt/sources.list.d/ros2.list >/dev/null
+  fi
+
+  # ---- 必要的变通：把 ROS 源强制改成 http ----
+  #
+  # 实测（2026-07-27，Windows 侧与 WSL 侧结果一致）：
+  #   https://packages.ros.org 返回的证书是 CN=*.osuosl.org（Oregon State University
+  #   Open Source Lab，ROS 官方托管方），SAN 只含 *.osuosl.org 与 osuosl.org，
+  #   不含 packages.ros.org  ->  curl rc=60 / apt "证书主机名不匹配"。
+  #   这是服务端证书配置问题，不是本机或 WSL 的问题。
+  #   同一路径走 http:// 返回 HTTP 200，仓库本身可达。
+  #
+  # 为什么改用 http 是安全的：
+  #   apt 的完整性保障来自 InRelease 文件的 GPG 签名（密钥来自上面那个可信 .deb），
+  #   而不是来自 TLS。TLS 在这里只提供保密性（隐藏"你在下什么包"），
+  #   不提供完整性。篡改过的包会因签名校验失败被 apt 拒绝。
+  #   Debian/Ubuntu 官方源默认也是 http，原理相同。
+  #
+  # 若哪天上游修好了证书，把下面这段删掉即可。
+  for f in /etc/apt/sources.list.d/ros2*.list /etc/apt/sources.list.d/ros2*.sources; do
+    [[ -f "$f" ]] || continue
+    if grep -q 'https://packages.ros.org' "$f"; then
+      sudo sed -i 's|https://packages\.ros\.org|http://packages.ros.org|g' "$f"
+      warn "已把 $(basename "$f") 中的 ROS 源改为 http（上游证书主机名不匹配，见脚本内注释）"
+    fi
+  done
+
   sudo apt-get update -qq
   echo "  安装 ros-${ROS_DISTRO_NAME}-desktop（约 2 GB，10-20 分钟）..."
   sudo apt-get install -y "ros-${ROS_DISTRO_NAME}-desktop" \
