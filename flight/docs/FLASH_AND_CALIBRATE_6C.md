@@ -52,17 +52,54 @@ PX4 官方文档 `config/firmware.md` 的原文警告，逐条照做：
 
 ---
 
-## 第 1 步：装 QGroundControl
+## 第 1 步：装 QGroundControl —— ✅ 已完成（2026-07-27，Kiro 代装）
 
-1. 下载 Windows 安装包（161.6 MB）：
+**本机（`METAMECHBOOK01`）已装好，此步可跳过。** 记录如下供复核与换机时参考。
 
-   https://github.com/mavlink/qgroundcontrol/releases/download/v5.0.8/QGroundControl-installer.exe
+| 项 | 值 |
+|---|---|
+| 版本 | **v5.0.8**（QGC 当前 stable，2025-10-09 发布） |
+| 来源 | `https://github.com/mavlink/qgroundcontrol/releases/download/v5.0.8/QGroundControl-installer.exe` |
+| 安装包大小 | 169,411,570 字节（161.56 MB）—— **与 GitHub API 报告的字节数完全一致** |
+| 安装包 SHA256 | `F0950040488FC858D002133E8C50401520B4A3C9BF202B7635CDD41AF7C97054` |
+| 安装器框架 | NSIS（静默参数 `/S`） |
+| 安装路径 | `C:\Program Files\QGroundControl\bin\QGroundControl.exe` |
+| 安装体积 | 597.1 MB / 1910 个文件 |
+| 卸载 | 「添加或删除程序」里的 `QGroundControl`，或 `C:\Program Files\QGroundControl\QGroundControl-Uninstall.exe` |
+| 启动验证 | ✅ 已实际启动，`Responding=True`，**AMD 显卡下直接可用，无需 GPU 兼容模式** |
 
-   或从官网入口进：https://qgroundcontrol.com/downloads/
+### 两点如实说明
 
-2. 双击安装，一路默认。装完先**不要**插飞控。
+1. **安装包没有数字签名**（`Get-AuthenticodeSignature` 返回 `NotSigned`）。QGroundControl 官方
+   一直不对 Windows 安装包做代码签名，release 说明里也没有发布 SHA256/MD5 校验和。
+   因此完整性验证依据是：**官方 GitHub release 的 HTTPS 直链 + 字节数与 GitHub API 精确匹配**。
+   这是该项目当前能做到的最强验证，不是疏漏。
 
-3. Windows 10/11 会自动为 Pixhawk 装 USB 串口驱动（CDC ACM），一般不需要手动装驱动。
+2. **安装器清单要求 `requireAdministrator`**，所以安装必然弹 UAC。
+
+### 换机器时怎么重装
+
+```powershell
+# 下载（BITS 比 curl 在不稳定链路上更可靠，且支持续传）
+Import-Module BitsTransfer
+Start-BitsTransfer -Source "https://github.com/mavlink/qgroundcontrol/releases/download/v5.0.8/QGroundControl-installer.exe" `
+                   -Destination "$env:USERPROFILE\Downloads\QGroundControl-installer.exe"
+
+# 校验字节数（必须是 169411570）
+(Get-Item "$env:USERPROFILE\Downloads\QGroundControl-installer.exe").Length
+
+# 静默安装（会弹 UAC，点「是」）
+Start-Process "$env:USERPROFILE\Downloads\QGroundControl-installer.exe" -ArgumentList '/S' -Verb RunAs -Wait
+```
+
+> winget 源里**没有** QGroundControl 包（已查证），只能走官方 release。
+
+### 关于 USB 驱动
+
+Windows 10/11 会自动为 Pixhawk 装 USB 串口驱动（CDC ACM），**一般不需要手动装**。
+
+若第 2 步认不到板子，安装目录根下有官方附带的 `C:\Program Files\QGroundControl\driver.msi`
+可以作为兜底手段安装。现在不要装它 —— 没必要的驱动只会增加变量。
 
 ---
 
@@ -318,7 +355,7 @@ GPS 模块自带的罗盘也是那时才接上。
 
 阶段 A 全部做完后，逐项确认：
 
-- [ ] QGroundControl v5.0.8 已安装
+- [x] QGroundControl v5.0.8 已安装（2026-07-27 由 Kiro 代装并验证启动）
 - [ ] 6C 能被电脑识别（有 COM 口）
 - [ ] 固件已刷成 **v1.17.0**，Summary 页确认
 - [ ] Summary 页板型显示 Pixhawk 6C / PX4 FMU v6C

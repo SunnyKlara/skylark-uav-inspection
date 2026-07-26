@@ -39,12 +39,17 @@
 - [x] 2026-07-27：三份实操文档（`WIRING_6C.md` / `SERIAL_BUDGET.md` / `SAFETY_CHECKLIST.md`）
 - [x] 2026-07-27：WSL2 环境引导脚本 `bootstrap_wsl2.sh`（幂等，含 AMD 渲染兜底）
 - [x] 2026-07-27：修复 `.kiro/skills/.../scripts/*.sh` 的 CRLF 行尾（4 个文件，WSL 下会报 bad interpreter），并加 `.gitattributes` 防复发
+- [x] 2026-07-27：写 `docs/FLASH_AND_CALIBRATE_6C.md` —— 6C 刷固件与校准的逐步操作指导（10 步 + 11 条故障排查 + 17 项检查表），依据官方文档撰写
+- [x] 2026-07-27：**核实 PX4 当前 stable 实为 v1.17.0**（`releases/latest` 与 `stable` 分支双重确认），更正此前「v1.18.0 是 stable」的错误判断。有利后果：QGC 默认选项刷的就是我们锁定的版本，无需手动下固件
+- [x] 2026-07-27：**装好 QGroundControl v5.0.8** 并验证启动（`C:\Program Files\QGroundControl\bin\QGroundControl.exe`，597 MB，AMD 显卡下无需 GPU 兼容模式）
 
 ---
 
 ## 4. 待办（按优先级）
 
+- [x] [已完成 2026-07-27] 装 QGroundControl v5.0.8（Kiro 代装 + 启动验证，AMD 显卡直接可用）
 - [ ] [紧急·用户操作] 6C 首次上电：刷 v1.17.0 → 全套校准 → 导出 `pixhawk6c_bench_v1.params` → 登记到 `params/CHANGELOG.md`
+      **指导文档已就绪**：`flight/docs/FLASH_AND_CALIBRATE_6C.md`（第 1 步已可跳过）
 - [ ] [紧急·用户操作] `wsl --install -d Ubuntu-22.04` + 配 `.wslconfig`
 - [ ] [本周] 跑 `bootstrap_wsl2.sh`，确认 `colcon build` 通过、`ros2 interface show skylark_flight_msgs/action/InspectSweep` 有输出
 - [ ] [本周] 跑通 PX4 官方 `offboard_control` 示例（SITL + Gazebo）
