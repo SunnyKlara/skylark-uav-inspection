@@ -189,6 +189,9 @@ IDE 编辑、git 操作也在 Windows 侧统一管理。
 | **apt 报 `packages.ros.org` 证书主机名不匹配** | **上游服务端问题，非本机故障。** `bootstrap_wsl2.sh` 已自动把 ROS 源改成 `http://` 绕过，见下方说明 |
 | `colcon build` 被 OOM kill | `colcon build --parallel-workers 1`，或提高 `.wslconfig` 的 `memory` |
 | 脚本报 `bad interpreter: ...^M` | 行尾问题。仓库已加 `.gitattributes` 强制 `*.sh` 为 LF，若仍出现执行 `dos2unix <文件>` |
+| **clone 报 `GnuTLS recv error` / `HTTP2 framing layer`** | 本机到 github.com 的链路不稳定。脚本所有 clone 都已带 6 次重试 + `http.version HTTP/1.1`。**直接重跑脚本即可续传** |
+| **`ros2` 命令找不到 / `ROS_DISTRO` 为空（非交互 shell）** | Ubuntu 的 `~/.bashrc` 对非交互 shell 会提前 `return`。脚本已同时挂到 `~/.profile`。手动补：`echo '. ~/.skylark_env.sh' >> ~/.profile` |
+| **脚本在语法正确的行报 `syntax error`** | 你在它运行期间改了脚本文件。bash 边读边执行，改动会让字节偏移错位。改完重跑，或先 `cp` 到 `/tmp` 再执行副本 |
 | WSL 占用磁盘一直涨 | `.wslconfig` 已开 `sparseVhd=true`。手动回收：`wsl --shutdown` 后用 `diskpart` 的 `compact vdisk` |
 
 ---

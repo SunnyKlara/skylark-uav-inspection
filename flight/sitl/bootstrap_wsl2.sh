@@ -4,7 +4,12 @@
 # 目标：在 Windows + WSL2 上装好 PX4 SITL + Gazebo Harmonic + ROS 2 Humble + uXRCE-DDS，
 #       跑通 PX4 官方 offboard 示例，为后续 flight/ 开发打底。
 #
-# 幂等：可反复执行。已完成的步骤会跳过。
+# 幂等：可反复执行。已完成的步骤会跳过。网络中断后直接重跑即可续。
+#
+# ⚠ 重要：不要在本脚本运行期间编辑它。
+#   bash 是边读边执行的，中途修改文件会导致字节偏移错位，
+#   典型症状是在一个语法完全正确的位置报 "syntax error near unexpected token"。
+#   实测踩过（2026-07-27）。若必须边跑边改，先 cp 到 /tmp 再执行那个副本。
 #
 # 版本以 flight/VERSIONS.md 为唯一来源。改版本请改那里，然后同步本文件的变量。
 #
@@ -139,6 +144,9 @@ else
   git config --global http.lowSpeedLimit 0
   git config --global http.lowSpeedTime 999999
   git config --global core.compression 0   # 降 CPU 换稳定，减少长时间无数据导致的断流
+  # 实测子模块阶段还会出现 "curl 16 Error in the HTTP2 framing layer"。
+  # 这是 git/curl 在 HTTP/2 上的已知不稳定问题，强制走 HTTP/1.1 可规避。
+  git config --global http.version HTTP/1.1
 
   # ---- 第 1 步：主仓库（不含子模块），可重试 ----
   if [[ -d "${PX4_DIR}/.git" ]]; then
@@ -286,8 +294,15 @@ if command -v MicroXRCEAgent >/dev/null 2>&1; then
   ok "已安装: $(command -v MicroXRCEAgent)"
 else
   if [[ ! -d "${AGENT_DIR}/.git" ]]; then
-    git clone -b "$XRCE_AGENT_VERSION" \
-      https://github.com/eProsima/Micro-XRCE-DDS-Agent.git "$AGENT_DIR"
+    # 与工作区 clone 同样的链路风险，带重试
+    for i in 1 2 3 4 5 6; do
+      rm -rf "$AGENT_DIR"
+      git clone -b "$XRCE_AGENT_VERSION" \
+        https://github.com/eProsima/Micro-XRCE-DDS-Agent.git "$AGENT_DIR" 2>&1 && break
+      warn "  Agent clone 第 ${i}/6 次失败，8 秒后重试"
+      sleep 8
+    done
+    [[ -d "${AGENT_DIR}/.git" ]] || die "Micro-XRCE-DDS-Agent clone 6 次均失败"
   fi
   mkdir -p "${AGENT_DIR}/build"
   pushd "${AGENT_DIR}/build" >/dev/null
@@ -305,8 +320,30 @@ fi
 step "Skylark 工作区 ${WS_DIR}"
 mkdir -p "${WS_DIR}/src"
 
+# 带重试的 clone 助手。
+# 实测本机到 github.com 的链路会随机抛 GnuTLS recv error / HTTP2 framing error，
+# 单次 clone 失败会因 `set -e` 直接终止整个脚本。所有 clone 都必须走这里。
+clone_retry() {
+  local url="$1" dest="$2"; shift 2
+  local extra=("$@")
+  if [[ -d "${dest}/.git" ]] && [[ -n "$(ls -A "$dest" 2>/dev/null)" ]]; then
+    return 0
+  fi
+  local i
+  for i in 1 2 3 4 5 6; do
+    rm -rf "$dest"
+    if git clone "${extra[@]}" "$url" "$dest" 2>&1; then
+      return 0
+    fi
+    warn "  clone $(basename "$dest") 第 ${i}/6 次失败，8 秒后重试"
+    sleep 8
+  done
+  return 1
+}
+
 if [[ ! -d "${WS_DIR}/src/px4_msgs/.git" ]]; then
-  git clone -b "$PX4_MSGS_BRANCH" https://github.com/PX4/px4_msgs.git "${WS_DIR}/src/px4_msgs"
+  clone_retry https://github.com/PX4/px4_msgs.git "${WS_DIR}/src/px4_msgs" -b "$PX4_MSGS_BRANCH" \
+    || die "px4_msgs clone 6 次均失败。重跑本脚本可续，或手动 clone 到 ${WS_DIR}/src/px4_msgs"
   ok "px4_msgs (${PX4_MSGS_BRANCH})"
 else
   ACTUAL_BRANCH="$(git -C "${WS_DIR}/src/px4_msgs" rev-parse --abbrev-ref HEAD)"
@@ -319,7 +356,8 @@ else
 fi
 
 if [[ ! -d "${WS_DIR}/src/px4_ros_com/.git" ]]; then
-  git clone https://github.com/PX4/px4_ros_com.git "${WS_DIR}/src/px4_ros_com"
+  clone_retry https://github.com/PX4/px4_ros_com.git "${WS_DIR}/src/px4_ros_com" \
+    || die "px4_ros_com clone 6 次均失败。重跑本脚本可续，或手动 clone 到 ${WS_DIR}/src/px4_ros_com"
   ok "px4_ros_com（官方示例，含 offboard_control）"
 fi
 
@@ -389,11 +427,26 @@ RCFILE="${HOME}/.skylark_env.sh"
 } > "$RCFILE"
 ok "环境变量写入 ${RCFILE}"
 
+# 必须同时挂到 .bashrc 与 .profile。
+#
+# 原因（2026-07-27 实测踩过）：Ubuntu 默认 ~/.bashrc 开头有
+#   case $- in *i*) ;; *) return;; esac
+# 非交互 shell 会在此直接 return，追加在文件末尾的 source 行永远执行不到。
+# 后果是 `wsl -- bash -lc '...'`、CI、以及任何非交互调用都拿不到 ROS 环境，
+# 表现为 ros2 命令找不到、ROS_DISTRO 为空 —— 很容易误判成安装失败。
+# ~/.profile 由登录 shell 读取且没有交互性判断，正好补上这个缺口。
 if ! grep -q 'skylark_env.sh' "${HOME}/.bashrc" 2>/dev/null; then
   echo "[ -f ${RCFILE} ] && source ${RCFILE}" >> "${HOME}/.bashrc"
-  ok "已加入 ~/.bashrc"
+  ok "已加入 ~/.bashrc（交互式终端）"
 else
   ok "~/.bashrc 已配置"
+fi
+if ! grep -q 'skylark_env.sh' "${HOME}/.profile" 2>/dev/null; then
+  printf '\n# Skylark flight/ 环境（登录 shell，含非交互 bash -lc）\n[ -f %s ] && . %s\n' \
+    "${RCFILE}" "${RCFILE}" >> "${HOME}/.profile"
+  ok "已加入 ~/.profile（非交互登录 shell）"
+else
+  ok "~/.profile 已配置"
 fi
 
 # ============================================================

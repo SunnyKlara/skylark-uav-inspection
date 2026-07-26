@@ -18,13 +18,32 @@
 
 ## 2. 当前进度
 
-- 当前活跃任务：**S0 骨架搭建已完成，等待用户执行首次硬件上电**
+- 当前活跃任务：**S1 开发环境已全部就绪**，下一步跑通 PX4 SITL + Gazebo，然后实现 `skylark_autopilot_iface`
 - 启动时间：2026-07-27
 - 预计完成：S1（纯软 SITL）3-4 周，低强度并行推进
-- 阻塞情况：
-  - ⏸ **等用户操作**：6C 插 USB 刷固件 + 校准 + 导出 `.params` 基线（约 1 小时，无需配件）
-  - ⏸ **等用户操作**：WSL2 装 Ubuntu 22.04（`wsl --install -d Ubuntu-22.04`），之后即可跑 `flight/sitl/bootstrap_wsl2.sh`
-  - ⏸ **等用户拍板**：`HARDWARE_FLIGHT_LAYER.md` §12 的范围取舍（第三个检测场景 vs 真机闭环）
+
+### 环境就绪状态（2026-07-27 实测，全部核对过）
+
+| 组件 | 实测值 | 与 `VERSIONS.md` 一致 |
+|---|---|---|
+| Ubuntu（WSL2） | 22.04 | ✅ |
+| ROS 2 | humble | ✅ |
+| PX4-Autopilot | `v1.17.0`（tag 精确匹配，33 子模块 0 缺失，2.6 GB） | ✅ |
+| px4_msgs | `release/1.17` | ✅ |
+| Gazebo | **Gazebo Sim 8.14.0**（Harmonic） | ✅ |
+| Micro XRCE-DDS Agent | `/usr/local/bin/MicroXRCEAgent` | ✅ |
+| **`skylark_flight_msgs`** | **14/14 接口已被 ROS 2 注册** | ✅ |
+| `px4_ros_com` 示例 | 6 个可执行（含 `offboard_control`） | ✅ |
+| NuttX 工具链 | `arm-none-eabi-gcc 10.3.1` | ✅ |
+| WSL 资源 | nproc=12 / 内存 19Gi / swap 8Gi | ✅ 与 `.wslconfig` 一致 |
+
+### 阻塞情况
+
+- ⏸ **等用户操作**：6C 插 USB 刷固件 + 校准 + 导出 `.params` 基线（约 1 小时，无需配件）
+      指导：`flight/docs/FLASH_AND_CALIBRATE_6C.md`（QGC 已装好，第 1 步可跳过）
+- ⚠ **已知限制（不阻塞）**：Gazebo 只能软渲染（llvmpipe）。Ubuntu 22.04 的 Mesa 23.2
+      没把 d3d12 接进 GLX 路径，`/usr/lib/wsl/lib` 与 `/dev/dxg` 都正常但用不上。
+      功能完整、帧率低。改善路子见 `~/.skylark_env.sh` 内注释
 
 ---
 
@@ -42,6 +61,13 @@
 - [x] 2026-07-27：写 `docs/FLASH_AND_CALIBRATE_6C.md` —— 6C 刷固件与校准的逐步操作指导（10 步 + 11 条故障排查 + 17 项检查表），依据官方文档撰写
 - [x] 2026-07-27：**核实 PX4 当前 stable 实为 v1.17.0**（`releases/latest` 与 `stable` 分支双重确认），更正此前「v1.18.0 是 stable」的错误判断。有利后果：QGC 默认选项刷的就是我们锁定的版本，无需手动下固件
 - [x] 2026-07-27：**装好 QGroundControl v5.0.8** 并验证启动（`C:\Program Files\QGroundControl\bin\QGroundControl.exe`，597 MB，AMD 显卡下无需 GPU 兼容模式）
+- [x] 2026-07-27：**装好 WSL2 + Ubuntu 22.04 全套 SITL 环境，且未重启 Windows**
+      （详见 `sitl/WINDOWS_SETUP.md`。WSL 2.7.11 / 内核 6.18.33.2 / WSLg 1.0.73.2）
+- [x] 2026-07-27：**`colcon build` 成功，`skylark_flight_msgs` 14 个接口全部被 ROS 2 注册**
+      —— 这是接口契约的第一次真实编译验证（此前只有 Windows 上的静态语法检查）
+- [x] 2026-07-27：修 bootstrap 三处真实缺陷：所有 clone 加 6 次重试 + `http.version HTTP/1.1`；
+      env 文件同时挂 `~/.profile`（`.bashrc` 对非交互 shell 会提前 return）；
+      加「运行期间勿改本脚本」警告（bash 边读边执行，实测踩过）
 
 ---
 
