@@ -352,13 +352,14 @@ bash flight/sitl/measure_inflight.sh --no-takeoff     # 静止对照
 
 ⚠ **必须用锁定版本的源**。此前用的是 Windows 侧 `01_px4_core/PX4-Autopilot`，
 那是 PX4 **main 分支的浅克隆**，不是 v1.17.0 —— 这是 §7.1 错误一的直接来源。
-锁定版本的源在 WSL 里：`~/PX4-Autopilot`（v1.17.0）与 `~/ros2_ws/src/px4_msgs`（release/1.17）。
+锁定版本的源在 WSL 里：`~/PX4-Autopilot`（v1.17.0）与 `~/skylark_ws/src/px4_msgs`（release/1.17，235 个 `.msg`）。
+⚠ ROS 2 工作区叫 **`~/skylark_ws`**，不是 `ros2_ws`。此处曾写错，2026-07-28 核实更正。
 
 ```bash
 # 在 WSL2 里跑，用锁定版本的两棵树
 python3 /mnt/c/Users/Klara/Desktop/PX4/skylark/flight/tools/dds_bandwidth.py \
   --dds-topics ~/PX4-Autopilot/src/modules/uxrce_dds_client/dds_topics.yaml \
-  --msg-dir    ~/ros2_ws/src/px4_msgs/msg \
+  --msg-dir    ~/skylark_ws/src/px4_msgs/msg \
   --publications-only \
   --default-rate 100          # ⚠ 不要用默认的 10：v1.17.0 里无 rate_limit 的
                               #   vehicle_odometry / vehicle_attitude 实测都是 100 Hz
