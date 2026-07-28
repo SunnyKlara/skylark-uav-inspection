@@ -4,8 +4,26 @@
 # shell 脚本一旦带 CRLF，在 bash 里会报 "bad interpreter: /usr/bin/env bash^M"，
 # 这类问题排查起来很浪费时间，用 gitattributes 一次性钉死。
 #
-# 有意不写 `* text=auto` —— 那会让现有的 CRLF Python 文件在下次 checkout 时
-# 全部重写，产生几千行无意义 diff。只对确定需要固定行尾的类型生效。
+# 有意不写 `* text=auto`，也有意不给 *.py 加 eol=lf。理由需要说准（2026-07-27 核实）：
+#
+# 原注释写的是「现有的 CRLF Python 文件会被重写」。用 `git ls-files --eol` 核实后
+# 这个说法不准确 —— 仓库(index)里 39 个 .py **全部是 LF，没有一个 CRLF**。
+# 真实情况是本机 core.autocrlf=true，checkout 时把其中 33 个转成了 CRLF 工作树副本。
+# （和此前 .sh 那次 index/worktree 混淆是同一类误判，记在 flight/MODULE_STATE.md §7。）
+#
+# 但结论不变，只是原因不同：一旦给 *.py 加 eol=lf，那 33 个 CRLF 工作树文件
+# 会立刻相对 index 显示为「整文件已修改」，直到执行重新规范化。噪声是真的，
+# 只是发生在工作树侧而不是提交历史里。
+#
+# 因此现状保留。将来若要统一（建议在没有未提交改动时做）：
+#     git add --renormalize .
+#     git status          # 确认只有行尾变化
+#     git commit -m "chore: 统一 py 行尾为 LF"
+#
+# 注意由此产生的一个实际约束：flight/tools/*.py 在工作树里是 CRLF，
+# 所以要用 `python3 <脚本>` 调用（python 容忍 CRLF），
+# 不要 chmod +x 后直接 `./脚本` 跑 —— 那条路会踩到
+# "bad interpreter: /usr/bin/env python3^M"。
 
 # 必须 LF：会在 Linux/WSL 下被 bash 或 ROS 2 工具链读取
 *.sh      text eol=lf
