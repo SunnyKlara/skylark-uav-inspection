@@ -268,8 +268,11 @@ PDF 重编：✅ main.pdf 202KB / main_zh.pdf 312KB
 
 | 发现 | 数值 | 影响 |
 |---|---|---|
-| **PX4 默认 DDS 话题集占满 6C 串口预算** | **60,060 B/s = 921600 bps 链路的 100.3%** | 不裁剪直接联调必然丢包。已给出裁剪方案 B（65.7%）。这是低成本平台特有的工程约束，可写进论文 |
-| 带宽第一大户 | `/fmu/out/vehicle_odometry` 100 Hz = 12,400 B/s（占默认总量 20.6%） | GPS 巡检不做 VIO 融合可整条裁掉；但若后续做 GNSS 拒止环境巡检必须加回，届时只能换 6X |
+| **PX4 默认 DDS 话题集占 6C 串口预算**（实测修正） | **飞控自报 40,852 B/s ／订阅端实测 43,440 B/s；计入 16 B/条帧开销约 47,893 B/s = 921600 8N1 裸容量 92,160 B/s 的 52.0%** | **装得下，不裁剪也能跑**。两种互相独立的方法交叉验证（差值可由 CDR 封装头解释）。S2 建议先按默认配置上真机实测一轮，超 70% 再裁。仍是低成本平台特有的工程约束，可写进论文 |
+| ~~默认话题集占满串口 100.3%~~ | ~~60,060 B/s = 链路的 100.3%，裁剪方案 B 降至 65.7%~~ | **⚠ 2026-07-27 撤回。** 该估算有三个已确认错误，方向相反、大致抵消，故数字看着合理：① 源用错 —— 读的是 Windows 侧 PX4 **main 分支浅克隆**而非锁定的 v1.17.0，两份 `dds_topics.yaml` 差 9 处；② `vehicle_odometry` / `vehicle_attitude` 在 v1.17.0 里**无 `rate_limit`**，工具按假设的 10 Hz 算而实测 100 Hz，低估 15.8 kB/s；③ 预算公式重复扣开销（分母乘 0.65 又逐条加 16 B）。详见 `flight/docs/SERIAL_BUDGET.md` §7.1 |
+| 带宽第一大户（实测） | `/fmu/out/vehicle_odometry` 120 B × 99.99 Hz = **11,998 B/s，占实测总量 27.6%** | GPS 巡检不做 VIO 融合可整条裁掉，一条就能把占用降到 40% 附近；但若后续做 GNSS 拒止环境巡检必须加回，届时只能换 6X |
+| XRCE 帧开销按**条数**摊而非按字节摊 | `dds_topics.h.em` 发送循环对每条消息单独 `uxr_flash_output_streams`，源码留有 `// TODO: fill up the MTU and then flush` | 「话题数量比话题大小更重要」有了源码级依据。裁话题比降 `rate_limit` 更有效 |
+| `ros2 topic hz` / `ros2 topic bw` **不能用于带宽校准** | 量的是订阅端到达率，BEST_EFFORT 下跟不上就静默丢包。同一健康系统两轮读数 50.004 / 21.427 Hz（Gazebo RTF 均为 1.0） | 正确方法是用消息内 `timestamp` 反推 + 飞控 `uxrce_dds_client status` 交叉验证，见 `SERIAL_BUDGET.md` §6。**原文档正是推荐这两个命令做 S2 校准，已重写** —— 否则真机会按错的配方得出错的数 |
 | 6C 不是 PAB 形态 | 插不进 Holybro Jetson Baseboard | 必须分体式（6C + 独立机载电脑，TELEM2 串口互联）。AAS 算法层可全抄，硬件部署层不可抄 |
 | PX4 自带端到端神经控制器 | `mc_nn_control` + **fmu-v6c 专用编译目标** `make px4_fmu-v6c_neural`，15 KB TFLite 模型编进固件；uORB `NeuralControl` 内置 `inference_time` 埋点自动进 `.ulg` | 已登记为 Q3/Q4 加分机会，**本期明确不做**（`Kconfig` 里 `default n`，稳定性未验证） |
 
@@ -491,8 +494,8 @@ wsl --shutdown
 
 ## 16. 修改日志
 
-- 2026-07-27 Window-E: **飞控层落地**。新增 Window-E；4 项决策（AGPL-3.0 许可 / Gazebo 取代 AirSim / flight 归属 / 版本锁 v1.17.0）；接口契约包 `skylark_flight_msgs`（14 个接口，静态校验通过）；`dds_bandwidth.py` 算出默认 DDS 话题集占满 6C 串口 100.3%；三份实操文档 + WSL2 引导脚本；修复 4 个 `.sh` 的 CRLF 缺陷 + 新增 `.gitattributes`。详见 §9.1 与 `HARDWARE_FLIGHT_LAYER.md`
-- 2026-05-27 15:25 Window-A: 完成多窗口协作基础设施（MULTI_WINDOW_PROTOCOL.md + skill + steering + gpu_arbiter.py + Window-B 启动套件）
+- 2026-07-27 Window-E: **飞控层落地**。新增 Window-E；4 项决策（AGPL-3.0 许可 / Gazebo 取代 AirSim / flight 归属 / 版本锁 v1.17.0）；接口契约包 `skylark_flight_msgs`（14 个接口，静态校验通过）；~~`dds_bandwidth.py` 算出默认 DDS 话题集占满 6C 串口 100.3%~~（**该数字已于同日实测后撤回，见下一条 Window-E 记录**）；三份实操文档 + WSL2 引导脚本；修复 4 个 `.sh` 的 CRLF 缺陷 + 新增 `.gitattributes`。详见 §9.1 与 `HARDWARE_FLIGHT_LAYER.md`
+- 2026-07-27 Window-E: **SITL 全链路通 + 串口带宽结论修正**。`flight/sitl/smoke_test.sh` 13 项检查 RESULT=PASS（PX4 SITL↔uXRCE-DDS↔ROS 2），配纯函数单测；新增 `measure_dds_topics.py` 做实测，**撤回 §9.1 的「占满 100.3%」估算**，改为双源实测的 **52.0%**（默认话题集装得下）；`SERIAL_BUDGET.md` 重写，含原估算的三处错误剖析与正确的校准配方；`bootstrap_wsl2.sh` 的 git 传输加固从 `config --global` 改为环境变量注入（旧版把 `http.lowSpeedTime=999999` 写进全局配置，等于取消整机所有仓库的网络超时）。详见 `flight/MODULE_STATE.md` §5
 - 2026-05-27 14:53 Window-A: 完成 MASTER_ARCHITECTURE.md 写作
 - 2026-05-27 12:39 Window-A: 完成 PROJECT_NORTH_STAR.md 写作
 - 2026-05-27 12:30 Window-A: 修 5 处理论硬伤（基于 6254 个 box 实测）

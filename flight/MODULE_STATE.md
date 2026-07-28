@@ -54,7 +54,9 @@
 - [x] 2026-07-27：仿真器选型从 AirSim 改为 Gazebo Harmonic（AirSim 及其主要 fork Colosseum 均已归档）
 - [x] 2026-07-27：接口契约包 `skylark_flight_msgs` 落地（6 msg + 5 action + 3 srv = 14 个接口）
 - [x] 2026-07-27：写 `validate_interfaces.py` 并自测通过（14/14 接口无错误）
-- [x] 2026-07-27：写 `dds_bandwidth.py`，**算出 PX4 默认 DDS 话题集占满 6C 串口预算 100.3%**
+- [x] 2026-07-27：写 `dds_bandwidth.py`（设计期估算工具）。~~算出默认话题集占满 6C 串口 100.3%~~
+      —— **该结论同日被实测推翻，见 §5 与 `docs/SERIAL_BUDGET.md` §7.1**。工具本身保留，
+      职责收缩为「裁剪方案的 what-if 试算」，不再作为带宽数值的来源
 - [x] 2026-07-27：三份实操文档（`WIRING_6C.md` / `SERIAL_BUDGET.md` / `SAFETY_CHECKLIST.md`）
 - [x] 2026-07-27：WSL2 环境引导脚本 `bootstrap_wsl2.sh`（幂等，含 AMD 渲染兜底）
 - [x] 2026-07-27：修复 `.kiro/skills/.../scripts/*.sh` 的 CRLF 行尾（4 个文件，WSL 下会报 bad interpreter），并加 `.gitattributes` 防复发
@@ -78,8 +80,16 @@
       **指导文档已就绪**：`flight/docs/FLASH_AND_CALIBRATE_6C.md`（第 1 步已可跳过）
 - [ ] [紧急·用户操作] `wsl --install -d Ubuntu-22.04` + 配 `.wslconfig`
 - [ ] [本周] 跑 `bootstrap_wsl2.sh`，确认 `colcon build` 通过、`ros2 interface show skylark_flight_msgs/action/InspectSweep` 有输出
+- [x] [已完成 2026-07-27] **SITL 冒烟测试** `flight/sitl/smoke_test.sh`：13 项检查，PX4↔DDS↔ROS 2 全链路通，
+      RESULT=PASS。含纯函数单测 `flight/sitl/smoke_test_units.sh`（不启仿真、秒级反馈，全部通过）
+- [x] [已完成 2026-07-27] **带宽实测校准**：不是"用 release/1.17 重跑估算"，而是直接实测取代估算。
+      新增 `flight/tools/measure_dds_topics.py`，并用飞控自报的 `Payload tx` 交叉验证。
+      结论从「占满 100.3%」修正为「占裸容量 52%，装得下」，`SERIAL_BUDGET.md` 已重写
 - [ ] [本周] 跑通 PX4 官方 `offboard_control` 示例（SITL + Gazebo）
-- [ ] [本周] 在 `release/1.17` 分支的 px4_msgs 上重跑 `dds_bandwidth.py`，校准 `SERIAL_BUDGET.md` 的估算
+- [ ] [待办] 把 `SERIAL_BUDGET.md` 的修正同步到主 `STATE.md` §9.1 与 §16
+      —— 那里仍写着已撤回的 60,060 B/s / 100.3%。`STATE.md` 是共享文件，改前先与用户确认
+- [ ] [S2] 在真串口上实测 XRCE 帧开销（现在是 16 B/条的估算）。
+      也可先用 socat 造 pty 对、把 client 与 agent 都切到 serial 传输，在 SITL 里先量一版
 - [ ] [S1] 实现 `skylark_autopilot_iface`：Takeoff / Land / Orbit 三个 action 的 PX4 实现
 - [ ] [S1] 实现 `skylark_inspection_mode`：InspectSweep / Revisit 状态机 + 声明式任务 YAML 解析
 - [ ] [S1] 做一个光伏电站 Gazebo 世界（`sitl/worlds/`）
@@ -97,9 +107,14 @@
 
 | 事实 | 数值 / 位置 | 时间 | 来源 |
 |---|---|---|---|
-| **PX4 默认 DDS 话题集下行带宽** | **60,060 B/s = 921600 串口预算的 100.3%** | 2026-07-27 | `flight/tools/dds_bandwidth.py` |
-| 裁剪方案 B 后的带宽 | 39,385 B/s = 65.7% | 2026-07-27 | 同上，`--exclude` 五个话题 |
-| 带宽第一大户 | `/fmu/out/vehicle_odometry` 100 Hz = 12,400 B/s（占默认总量 20.6%） | 2026-07-27 | 同上 |
+| **PX4 默认 DDS 话题集下行带宽（实测）** | **飞控自报 40,852 B/s ／订阅端实测 43,440 B/s；计入 16 B/条帧开销约 47,893 B/s = 921600 8N1 裸容量(92,160 B/s)的 52.0%** | 2026-07-27 | `measure_dds_topics.py`（SITL 悬停 25s）+ pxh `uxrce_dds_client status` 双向交叉验证 |
+| ~~默认话题集占满串口 100.3%~~ | ~~60,060 B/s~~ **已撤回**：三个已确认错误（源用了 PX4 main 而非锁定的 v1.17.0；无 `rate_limit` 的两个大户按 10 Hz 猜、实测 100 Hz；分母重复扣一次协议开销）。详见 `docs/SERIAL_BUDGET.md` §7.1 | 2026-07-27 | 同上 |
+| 带宽第一大户（实测） | `/fmu/out/vehicle_odometry` 120 B × 99.99 Hz = 11,998 B/s，占实测总量 **27.6%**；v1.17.0 里该话题**无 `rate_limit`** | 2026-07-27 | 同上 |
+| 两份 `dds_topics.yaml` 的差异 | PX4 main(`8e7b370`) vs v1.17.0：**9 处不同**，话题数 69 vs 65 | 2026-07-27 | `flight/tools/diff_dds_topics_yaml.sh` |
+| **XRCE 帧开销按条数摊，不按字节摊** | `dds_topics.h.em` 发送循环每条消息单独 `uxr_flash_output_streams`，源码留有 `// TODO: fill up the MTU and then flush` | 2026-07-27 | 源码 `src/modules/uxrce_dds_client/dds_topics.h.em:143` |
+| **`ros2 topic hz` / `bw` 不能用于带宽校准** | 量的是订阅端到达率。同一健康系统两轮读数 50.004 / 21.427 Hz（RTF 均为 1.0）；订阅端因 TRANSIENT_LOCAL 历史回放落后 4~18 s。正确方法见 `SERIAL_BUDGET.md` §6 | 2026-07-27 | `flight/sitl/smoke_test.sh`、`flight/tools/measure_dds_topics.py`；排查过程的一次性诊断脚本留在工作区 `99_notes/`（未入库） |
+| PX4 v1.17 话题名带版本后缀 | `dds_topics.yaml` 里无 `_v` 后缀，运行时按各消息的 `MESSAGE_VERSION` 拼：`VehicleLocalPosition`(=1)→`vehicle_local_position_v1`，`VehicleAttitude`(=0)→无后缀 | 2026-07-27 | `msg/versioned/*.msg` + 实测话题表 |
+| SITL 下可脚本化 pxh 控制台 | 用 FIFO 顶住 stdin（`exec 3>fifo`）即可发 `commander arm` / `uxrce_dds_client status` / `uorb top`。headless 下解锁需先 `param set NAV_DLL_ACT 0`，否则报 `Preflight Fail: No connection to the GCS` | 2026-07-27 | `flight/sitl/measure_inflight.sh` |
 | 6C 串口数量 | 3 个（TELEM1/2/3），**无以太网** | 2026-07-27 | PX4 官方 `flight_controller/pixhawk6c.md` |
 | 6C 端口限流 | TELEM1 独立 1.5 A，其余端口**合计** 1.5 A | 2026-07-27 | 同上 |
 | 6C 不是 PAB 形态 | 插不进 Holybro Jetson Baseboard，必须分体式 | 2026-07-27 | Holybro 飞控对比表 6C 的 Baseboard 栏为 N/A |
@@ -146,7 +161,11 @@
 - [2026-07-27] **决策**：仿真器 AirSim → Gazebo Harmonic。除 AirSim 已归档外，追加决定性理由是本机为 AMD GPU，Isaac Sim/Pegasus 跑不了，AAS 的 CUDA Docker 栈也跑不了
 - [2026-07-27] **决策**：`flight/` 归 Window-E 而非 Window-C。知识域不重叠，混窗口会污染上下文。原属 Window-D 的 `simulation/` 并入本模块
 - [2026-07-27] **决策**：版本锁定 v1.17.0 对齐 AAS，而非更保守的 v1.16.2。理由是代码参考零适配摩擦 > 两轮补丁
-- [2026-07-27] **风险**：串口带宽是本模块最大的架构约束。默认配置已占满 100.3%。若后续要做 GNSS 拒止环境的 VIO 巡检，`vehicle_odometry` 必须加回来，带宽会重新变紧 → 届时只能换 6X（有以太网 + PAB）或坚持「机载处理完只回传结论」的现有架构
+- [2026-07-27] **风险（已按实测下调，但没消失）**：串口带宽仍是本模块最大的架构约束。
+  ~~默认配置已占满 100.3%~~ → 实测占裸容量 **52%**，默认配置装得下（见 §5）。
+  风险的实质变了：不再是「一上手就丢包」，而是「余量只有 40 kB/s，加任何高频话题都会吃掉它」。
+  若后续要做 GNSS 拒止环境的 VIO 巡检，`vehicle_odometry`（单条 12.0 kB/s）必须保留，
+  再叠加 VIO 相关话题就会重新变紧 → 届时只能换 6X（有以太网 + PAB）或坚持「机载处理完只回传结论」的现有架构
 - [2026-07-27] **风险**：ROS 2 Humble 官方配对 Gazebo Fortress，本项目用 Harmonic。基础闭环不需要 `ros_gz`（PX4 直连 gz transport，ROS 2 经 uXRCE-DDS 连 PX4），仅相机取流需要桥。届时按 AAS 的 GStreamer 方案或验证 `ros-humble-ros-gzharmonic`
 - [2026-07-27] **风险（最高）**：挤占论文时间。Q1 是论文季且在关键路径上。缓解措施是 `HARDWARE_FLIGHT_LAYER.md` §8 的「低强度并行」硬约束（每周 3-5 小时，优先安排在 v2 训练等待时段）。**每周日 review 时若发现论文进度落后于原计划，立刻暂停本模块**
 - [2026-07-27] **风险**：AMD GPU 上 Gazebo 渲染性能未知。`bootstrap_wsl2.sh` 已内置 `MESA_D3D12_DEFAULT_ADAPTER_NAME` 与 `LIBGL_ALWAYS_SOFTWARE` 兜底；最差退路是 `HEADLESS=1` 只用传感器数据不出图
