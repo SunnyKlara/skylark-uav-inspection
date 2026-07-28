@@ -36,8 +36,13 @@ die() { echo "${RED}错误:${RST} $*" >&2; exit 1; }
 
 ENVFILE="${HOME}/.skylark_env.sh"
 [[ -f "$ENVFILE" ]] || die "找不到 ${ENVFILE}。先跑 bootstrap_wsl2.sh"
+# ROS 2 的 setup.bash 不是 `set -u` 安全的（内部引用 AMENT_TRACE_SETUP_FILES 等
+# 未定义变量），在 set -u 下 source 会报 "unbound variable" 直接退出。
+# 必须临时关闭 -u。实测踩过（2026-07-27）。
+set +u
 # shellcheck disable=SC1090
 source "$ENVFILE"
+set -u
 
 PX4_DIR="${PX4_DIR:-${HOME}/PX4-Autopilot}"
 
@@ -65,6 +70,15 @@ if pgrep -f MicroXRCEAgent >/dev/null 2>&1; then
   exit 1
 fi
 
+# px4-rc.gzsim 里这两个变量都是「判空」而非判真假：
+#   if [ -z "${PX4_GZ_STANDALONE}" ]  -> 空才由 PX4 自己启动 Gazebo
+#   if [ -z "${HEADLESS}" ]           -> 空才启动 gz GUI
+# 所以：
+#   - 绝不能设 PX4_GZ_STANDALONE=0，"0" 是非空值，会让 PX4 以为 Gazebo 由外部启动，
+#     结果既不拉起 Gazebo 也探测不到 world 名，最终 "Timed out waiting for Gazebo world"。
+#     实测踩过（2026-07-27）。要 PX4 自己启动 Gazebo，就让它完全不存在。
+#   - 需要无界面时才把 HEADLESS=1 作为命令前缀传进去；不需要时一个字都不传。
+# 下面这个 HEADLESS 是本脚本的局部变量，未 export，不会泄漏给子进程。
 PX4_CMD="make px4_sitl ${MODEL}"
 [[ "$HEADLESS" == 1 ]] && PX4_CMD="HEADLESS=1 ${PX4_CMD}"
 

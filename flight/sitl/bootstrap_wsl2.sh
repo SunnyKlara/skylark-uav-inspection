@@ -138,15 +138,49 @@ else
 
   # git 传输加固。
   # 实测（2026-07-27）本机到 github.com 的链路不稳定，一次性递归 clone（1.5-2 GB）
-  # 反复失败于 "GnuTLS recv error (-54)" / "fetch-pack: unexpected disconnect"。
-  # 所以：① 调大缓冲、去掉低速中断；② 主仓库与子模块分两步，各自可重试可续传。
-  git config --global http.postBuffer 524288000
-  git config --global http.lowSpeedLimit 0
-  git config --global http.lowSpeedTime 999999
-  git config --global core.compression 0   # 降 CPU 换稳定，减少长时间无数据导致的断流
-  # 实测子模块阶段还会出现 "curl 16 Error in the HTTP2 framing layer"。
-  # 这是 git/curl 在 HTTP/2 上的已知不稳定问题，强制走 HTTP/1.1 可规避。
-  git config --global http.version HTTP/1.1
+  # 反复失败于 "GnuTLS recv error (-54)" / "fetch-pack: unexpected disconnect"；
+  # 子模块阶段还会出现 "curl 16 Error in the HTTP2 framing layer"（git/curl 在
+  # HTTP/2 上的已知不稳定问题，强制 HTTP/1.1 可规避）。
+  # 对策：① 调大缓冲、放宽低速判定、关压缩；② 主仓库与子模块分两步，各自可重试可续传。
+  #
+  # ⚠ 这些设置用 GIT_CONFIG_COUNT 环境变量注入，**不写进任何 config 文件**。
+  #
+  # 早先这里写的是 `git config --global`，那是错的，而且已经在本机造成实际污染：
+  #   - 作用域是整台机器的所有仓库，与 PX4 无关的仓库一并被改
+  #   - 脚本既不告知也不还原，用户不知道自己的 git 被动过
+  #   - 最有害的是 lowSpeedLimit=0 + lowSpeedTime=999999 —— 等于**取消所有仓库的
+  #     网络超时**，此后任何 git 操作卡住都不会自己失败，只能手动中断
+  # 环境变量注入能拿到同样的加固效果，进程退出即失效。
+  # git >= 2.31 支持该机制（Ubuntu 22.04 自带 2.34.1，已实测）。
+  #
+  # 低速阈值也改成了「慢链路扛得住、真断线仍会及时失败」的值，
+  # 而不是原来那种永不超时。
+  export GIT_CONFIG_COUNT=5
+  export GIT_CONFIG_KEY_0=http.postBuffer   GIT_CONFIG_VALUE_0=524288000
+  export GIT_CONFIG_KEY_1=http.lowSpeedLimit GIT_CONFIG_VALUE_1=1000
+  export GIT_CONFIG_KEY_2=http.lowSpeedTime  GIT_CONFIG_VALUE_2=300
+  export GIT_CONFIG_KEY_3=core.compression   GIT_CONFIG_VALUE_3=0
+  export GIT_CONFIG_KEY_4=http.version       GIT_CONFIG_VALUE_4=HTTP/1.1
+
+  # 检测旧版脚本留下的全局污染并告知。
+  # 这里刻意**只提示不自动删** —— 用户可能出于自己的原因设过同名项，
+  # 脚本静默删掉，性质和当初静默写入一样坏。要不要清由用户决定。
+  POLLUTED=()
+  for k in http.postBuffer http.lowSpeedLimit http.lowSpeedTime core.compression http.version; do
+    git config --global --get "$k" >/dev/null 2>&1 && POLLUTED+=("$k")
+  done
+  if (( ${#POLLUTED[@]} > 0 )); then
+    warn "检测到全局 git 配置里有 ${#POLLUTED[@]} 项可能是本脚本旧版本写入的："
+    for k in "${POLLUTED[@]}"; do
+      warn "    ${k} = $(git config --global --get "$k")"
+    done
+    warn "  本次运行已改用环境变量注入，不再需要这些全局项。"
+    warn "  尤其检查 http.lowSpeedTime —— 若是 999999，等于所有仓库都不再有网络超时。"
+    warn "  确认无用后可自行清除："
+    for k in "${POLLUTED[@]}"; do
+      warn "    git config --global --unset-all ${k}"
+    done
+  fi
 
   # ---- 第 1 步：主仓库（不含子模块），可重试 ----
   if [[ -d "${PX4_DIR}/.git" ]]; then
@@ -197,11 +231,49 @@ else
     sleep 10
   done
   if [[ "$SUBMOD_OK" == 1 ]]; then
-    ok "子模块全部就绪"
+    ok "子模块同步命令已成功返回"
   else
     warn "子模块未全部完成。可重跑本脚本续传，或手动："
     warn "  git -C ${PX4_DIR} submodule update --init --recursive"
-    warn "编译固件需要子模块完整；仅跑 SITL 也需要部分子模块。"
+  fi
+
+  # ---- 第 3 步：内容审计（命令成功 ≠ 内容完整）----
+  #
+  # 实测踩过（2026-07-27）：不稳定网络下部分子模块会进入半成品状态 ——
+  # `git submodule status` 报告已在正确 commit（无 `-` 前缀），但工作树里只有
+  # 一个几十字节的 .git 指针文件，源码完全没 checkout。
+  # 于是 `grep -c '^-'` 返回 0，看起来正常，直到编译时报：
+  #   CMake Error: Cannot find source file: heatshrink/heatshrink_decoder.c
+  # 本次有 7 个子模块中招。所以必须审计内容，不能只信 status。
+  step "PX4 子模块内容审计"
+  AUDIT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../tools" 2>/dev/null && pwd)/check_px4_submodules.sh"
+  if [[ -f "$AUDIT" ]]; then
+    if PX4_DIR="$PX4_DIR" bash "$AUDIT" >/dev/null 2>&1; then
+      ok "子模块内容完整"
+    else
+      warn "发现内容为空的子模块，自动修复中（用 --force 强制重新 checkout）..."
+      if PX4_DIR="$PX4_DIR" bash "$AUDIT" --repair; then
+        ok "子模块修复完成"
+      else
+        warn "仍有子模块未修复，编译可能失败。手动重试："
+        warn "  bash ${AUDIT} --repair"
+      fi
+    fi
+  else
+    # 找不到工具时做个最小内联检查，至少别让问题静默通过
+    BAD=0
+    while read -r _ p _; do
+      [[ -n "$p" ]] || continue
+      [[ -d "$p" ]] || { BAD=$((BAD+1)); continue; }
+      (( $(find "${PX4_DIR}/${p}" -type f 2>/dev/null | head -3 | wc -l) < 3 )) && BAD=$((BAD+1))
+    done < <(git -C "$PX4_DIR" submodule status --recursive 2>/dev/null)
+    if (( BAD > 0 )); then
+      warn "检测到 ${BAD} 个子模块内容为空，执行强制同步"
+      git -C "$PX4_DIR" submodule update --init --force --recursive --jobs 4 || \
+        warn "强制同步未完全成功"
+    else
+      ok "子模块内容完整"
+    fi
   fi
 
   step "PX4 工具链 + Gazebo Harmonic"
@@ -387,8 +459,14 @@ fi
 # 6. 构建工作区
 # ============================================================
 step "构建工作区"
+# ROS 2 的 setup.bash 不是 `set -u` 安全的（内部引用 AMENT_TRACE_SETUP_FILES 等
+# 未定义变量），本脚本开头是 `set -euo pipefail`，直接 source 会报
+# "unbound variable" 并因 set -e 终止整个脚本。必须临时关闭 -u。
+# 实测踩过（2026-07-27，在 smoke_test.sh 上先暴露出来）。
+set +u
 # shellcheck disable=SC1090
 source "/opt/ros/${ROS_DISTRO_NAME}/setup.bash"
+set -u
 pushd "$WS_DIR" >/dev/null
 if colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release; then
   ok "colcon build 成功"
