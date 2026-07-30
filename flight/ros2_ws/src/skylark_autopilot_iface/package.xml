@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://relaxng.org/ns/structure/1.0"?>
+<package format="3">
+  <name>skylark_autopilot_iface</name>
+  <version>0.1.0</version>
+  <description>
+    把 PX4 飞控包装成 Skylark 的「飞行动作」抽象。edge/ 只调用 action，不直接碰
+    PX4 的话题与模式切换。本包是 skylark_flight_msgs 契约在 flight 侧的唯一实现者。
+
+    设计依据全部来自实测，见 flight/docs/OFFBOARD_CONSTRAINTS.md。
+  </description>
+  <maintainer email="klara@example.invalid">Skylark Window-E</maintainer>
+  <license>AGPL-3.0-or-later</license>
+
+  <depend>rclpy</depend>
+  <depend>px4_msgs</depend>
+  <depend>skylark_flight_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>builtin_interfaces</depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

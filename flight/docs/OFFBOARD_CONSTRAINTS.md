@@ -21,24 +21,81 @@
 | 6 | 爬升速率 | 从地面到 4.5 m 用 7.30 s，约 0.65 m/s | action 的超时阈值按此量级设，别按瞬时完成设 |
 | 7 | headless SITL 下 `gcs_connection_lost` 与 `manual_control_signal_lost` **恒为真** | `failsafe_flags` 全程报这两项（没 QGC 也没遥控） | 这就是约束 3 的机制。action 不能把「有 failsafe 标志位」当成异常，要**按标志位逐项判断** |
 
-### 7.1 一个尚未坐实但影响实现的观察：示例的时间戳写法在 lockstep 下不可靠
+### 7.1 一个未解释的观察：发布节点存活但 offboard 信号被判丢失
 
 阶段 A 里发布节点全程存活（日志确认 SIGTERM 是 25 s 后我们自己发的），
 但 PX4 在第 16.22 s 就报了 `offboard_control_signal_lost`。
 
-**合理解释**（未做对照实验，勿当结论）：官方示例用 `this->get_clock()->now()`
-（ROS 时钟 = 墙钟）填 `timestamp`，而 PX4 在 lockstep 下走仿真时钟。
-先前实测过两者存在会漂移的秒级偏移（最大 -4.7 s，PX4 时钟超前）。
-一旦偏移超过 `COM_OF_LOSS_T`（1.0 s），PX4 就会把持续到达的 setpoint 判为过期。
+**先前写在这里的解释是错的，已撤回。** 原文说「示例用 ROS 时钟填 timestamp
+而 PX4 走仿真时钟，偏移超过容限导致 setpoint 被判过期」，据此要求实现层自己
+做时钟换算。读源码后该说法不成立：
 
-**对实现的影响是明确的**：`skylark_autopilot_iface` 不要照抄示例的时间戳写法。
-可选做法（按可靠性排序）：
-1. 订阅任一 `/fmu/out/*` 话题，用最近收到的 PX4 `timestamp` 加本地经过时间外推
-2. 用 `/fmu/out/timesync_status` 的偏移量把本地时钟换算到 PX4 时钟域
-3. 节点开 `use_sim_time` 并确认 `/clock` 源确实是 PX4 时钟（SITL 下未验证）
+```c
+// dds_topics.h.em / 生成后的 dds_topics.h，入站分支
+const int64_t time_offset_us = session->time_offset / 1000;
+ucdr_deserialize_trajectory_setpoint(*ub, data, time_offset_us);
+ucdr_deserialize_offboard_control_mode(*ub, data, time_offset_us);
+```
 
-待验证：把时间戳改成 PX4 时钟域后，长时间 offboard 是否就不再掉线。
-这是 Takeoff action 的第一个回归测试项。
+**入站 `/fmu/in/*` 的 timestamp 已经由 `uxrce_dds_client` 用 `time_offset_us`
+换算过。** 所以用 ROS 时钟填 `timestamp` 是设计上正确的做法，示例没错，
+实现层也不需要额外换算。
+
+**浸泡测试给出了机制证据，但现象是间歇性的：3 轮里只有 1 轮复现。**
+复现脚本：`bash flight/sitl/soak_offboard.sh [时长秒] [输出目录]`
+原始数据：`99_notes/soak/report.txt`（90 s，复现）、`99_notes/soak2/`（45 s，未复现）。
+
+⚠ 不要把下面这组数据当作「每次都会这样」。**触发条件未知**，
+所以既不能靠它算出丢失频率，也不能据此判断一次几分钟的飞行必然会遇到。
+能确定的只有「它会发生」，这已经足以决定实现必须容错。
+
+复现的那一轮里发布节点全程存活（PID 核实），90 s 内自发丢失 2 次，且**每次恢复
+都紧跟一次时钟偏移跳变，跳变过程中偏移会瞬间变成 0**：
+
+```
+[ 0.52s] offboard_control_signal_lost: None -> True     ← 尚未发 setpoint，正常
+[ 7.02s] timesync 偏移跳变: -1785406211247446 -> 0 -> -1785406209466230us
+[ 7.11s] offboard_control_signal_lost: True -> False    ← 跳变后立刻恢复
+[27.23s] offboard_control_signal_lost: False -> True    ← 自发丢失
+[37.73s] timesync 偏移跳变: ... -> 0 -> -1785406207770396us
+[37.79s] offboard_control_signal_lost: True -> False    ← 又是跳变后立刻恢复
+[88.01s] offboard_control_signal_lost: False -> True
+```
+
+那个瞬间的 0 正对应源码里的 `session->time_offset = 0`（重置分支）。
+**推测的链路**（与观测一致，但未做受控实验证明因果）：lockstep 下 PX4 的偏移估计
+逐渐陈旧 → 入站 setpoint 的时间戳漂出 `COM_OF_LOSS_T`（1.0 s）容限被判过期
+→ `offboard_control_signal_lost` 置真 → 一次重新同步把偏移纠回来 → 标志清除。
+
+两轮之间还有个可能相关的差异：复现那轮 `timesync` 的 `round_trip_time` 最大 4000 us，
+未复现那轮全程为 0。即两轮的同步交互本身就不同，值得作为下次排查的切入点。
+
+注意复现那一轮飞机未解锁，所以没触发 RTL；**解锁飞行时同样的抖动会真的触发失效保护**。
+
+`uxrce_dds_client.cpp` 每秒做一次 `uxr_sync_session`，并且**会失去收敛**：
+
+```c
+} else if (_timesync_converged && !_timesync.sync_converged()) {
+        PX4_DEBUG("time sync no longer converged");
+}
+```
+
+失去收敛时 `session->time_offset` 变化，在途 setpoint 的时间戳会随之偏移，
+可能被判过期。麻烦的是这两条日志是 `PX4_DEBUG`，**默认级别不打印**，
+所以历史日志里查不到，只能靠订阅 `/fmu/out/timesync_status` 观察偏移量跳变来定性。
+
+**对实现的影响**：
+`offboard_control_signal_lost` 会在发布端完全正常的情况下短暂出现（实测 90 s 内 2 次）。
+所以 action **不能因为一次 offboard 信号丢失就 abort**，必须区分「抖动」与「持续丢失」。
+
+判据用**时间**而不是次数：`failsafe_flags` 实测只有约 1.85 Hz，
+按「连续 N 帧」算会隐含一个随发布频率变化的时长。实现里用
+「该标志持续为真超过 grace 秒」，默认 3 s（>1 次重同步周期的抖动宽度，
+又远小于一次真实断流该被发现的时间）。
+
+尚未验证的缓解手段（留给后续）：`UXRCE_DDS_SYNC*` 系列参数能否关掉时间戳同步，
+让 PX4 用到达时刻给入站消息打时间戳 —— 那会从根上消除这个抖动，
+但会同时影响出站时间戳，需评估对带宽实测与日志时序的影响。
 
 ## 2. 官方示例的机制（`px4_ros_com` 的 `offboard_control`）
 

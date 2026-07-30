@@ -46,16 +46,25 @@ NAV_STATE = {
 ARMING_STATE = {1: "DISARMED", 2: "ARMED"}
 
 
-def resolve(node: Node, base: str) -> str | None:
+def resolve(node: Node, base: str, timeout: float = 10.0) -> str | None:
     """PX4 v1.17 起话题名按各消息的 MESSAGE_VERSION 拼 _vN 后缀
     （VehicleStatus=1 -> vehicle_status_v1，VehicleAttitude=0 -> 无后缀）。
-    写死名字必然踩空，按正则匹配运行时真实存在的那个。"""
+    写死名字必然踩空，按正则匹配运行时真实存在的那个。
+
+    ⚠ 必须用「有发布者」筛选，不能只看名字匹配：别的节点订阅一个不存在的话题名时，
+    那个名字也会出现在 ROS 图里（订阅端也是端点）。只按名字匹配会撞上这种
+    **幽灵话题**，订阅到永远没有数据的名字上。实测踩过：autopilot_iface 曾因
+    发现未完成而退化订阅了无后缀名，随后本工具就解析到了那个幽灵话题，
+    全程读不到任何状态。
+    """
     pat = re.compile(rf"^/fmu/out/{base}(_v\d+)?$")
-    deadline = time.time() + 8
+    deadline = time.time() + timeout
     while time.time() < deadline:
-        for topic, _ in node.get_topic_names_and_types():
-            if pat.match(topic):
-                return topic
+        alive = [t for t, _ in node.get_topic_names_and_types()
+                 if pat.match(t) and node.count_publishers(t) > 0]
+        if alive:
+            alive.sort(key=lambda t: (0 if re.search(r"_v\d+$", t) else 1, t))
+            return alive[0]
         time.sleep(0.3)
     return None
 

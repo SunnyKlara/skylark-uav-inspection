@@ -60,7 +60,7 @@ cleanup() {
   [[ -n "${PX4_PID:-}"   ]] && kill -TERM "$PX4_PID"   2>/dev/null
   [[ -n "${AGENT_PID:-}" ]] && kill -TERM "$AGENT_PID" 2>/dev/null
   sleep 2
-  pkill -f 'px4 ' 2>/dev/null; pkill -f MicroXRCEAgent 2>/dev/null
+  pkill -f px4_sitl 2>/dev/null; pkill -f 'bin/px4' 2>/dev/null; pkill -f gz_x500 2>/dev/null; pkill -f MicroXRCEAgent 2>/dev/null
   pkill -f 'gz sim' 2>/dev/null; pkill -f 'ruby.*gz' 2>/dev/null
   rm -f "$FIFO"
   sleep 1; log "清理完成"
@@ -79,7 +79,7 @@ log "PX4 源码树: ${PX4_DIR}  ref=$(git -C "$PX4_DIR" describe --tags --always
 log "工况: $([[ "$TAKEOFF" == 1 ]] && echo '解锁悬停' || echo '静止未解锁（对照）')   采集 ${DURATION}s"
 log "输出: ${OUT_JSON}"
 
-pkill -f MicroXRCEAgent 2>/dev/null; pkill -f 'px4 ' 2>/dev/null
+pkill -f MicroXRCEAgent 2>/dev/null; pkill -f px4_sitl 2>/dev/null; pkill -f 'bin/px4' 2>/dev/null; pkill -f gz_x500 2>/dev/null
 pkill -f 'gz sim' 2>/dev/null; sleep 2
 
 MicroXRCEAgent udp4 -p 8888 > "$AGENT_LOG" 2>&1 & AGENT_PID=$!

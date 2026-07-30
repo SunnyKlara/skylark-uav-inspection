@@ -103,7 +103,7 @@ cleanup() {
   [[ -n "${PX4_PID:-}"   ]] && kill -TERM "$PX4_PID"   2>/dev/null && info "已停 PX4 (pid $PX4_PID)"
   [[ -n "${AGENT_PID:-}" ]] && kill -TERM "$AGENT_PID" 2>/dev/null && info "已停 Agent (pid $AGENT_PID)"
   sleep 2
-  pkill -f 'px4 ' 2>/dev/null
+  pkill -f px4_sitl 2>/dev/null; pkill -f 'bin/px4' 2>/dev/null; pkill -f gz_x500 2>/dev/null
   pkill -f MicroXRCEAgent 2>/dev/null
   pkill -f 'gz sim' 2>/dev/null
   pkill -f 'ruby.*gz' 2>/dev/null
@@ -143,7 +143,7 @@ fi
 
 # 清掉可能残留的旧进程，避免端口冲突
 pkill -f MicroXRCEAgent 2>/dev/null
-pkill -f 'px4 ' 2>/dev/null
+pkill -f px4_sitl 2>/dev/null; pkill -f 'bin/px4' 2>/dev/null; pkill -f gz_x500 2>/dev/null
 sleep 2
 
 # ---------- 1. Agent ----------
