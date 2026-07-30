@@ -119,6 +119,7 @@
 | **XRCE 帧开销按条数摊，不按字节摊** | `dds_topics.h.em` 发送循环每条消息单独 `uxr_flash_output_streams`，源码留有 `// TODO: fill up the MTU and then flush` | 2026-07-27 | 源码 `src/modules/uxrce_dds_client/dds_topics.h.em:143` |
 | **`ros2 topic hz` / `bw` 不能用于带宽校准** | 量的是订阅端到达率。同一健康系统两轮读数 50.004 / 21.427 Hz（RTF 均为 1.0）；订阅端因 TRANSIENT_LOCAL 历史回放落后 4~18 s。正确方法见 `SERIAL_BUDGET.md` §6 | 2026-07-27 | `flight/sitl/smoke_test.sh`、`flight/tools/measure_dds_topics.py`；排查过程的一次性诊断脚本留在工作区 `99_notes/`（未入库） |
 | PX4 v1.17 话题名带版本后缀 | `dds_topics.yaml` 里无 `_v` 后缀，运行时按各消息的 `MESSAGE_VERSION` 拼：`VehicleLocalPosition`(=1)→`vehicle_local_position_v1`，`VehicleAttitude`(=0)→无后缀 | 2026-07-27 | `msg/versioned/*.msg` + 实测话题表 |
+| **相机取流可行,软渲染下 25 fps** | gz 话题 `/world/default/model/x500_mono_cam_0/link/camera_link/sensor/imager/image`；`ros_gz_image image_bridge`（`ros-humble-ros-gzharmonic` 0.244.12-3jammy）桥到同名 ROS 2 话题；**25.28 fps @ 1280×960 rgb8**，llvmpipe 软渲染，12 核负载 3.22。机型用 `gz_x500_mono_cam`（PX4 自带，另有 depth/gimbal/lidar 变体） | 2026-07-30 | `flight/sitl/test_camera_bridge.sh`，报告 `99_notes/cam1/` |
 | **`UXRCE_DDS_SYNCT=0` 可根治 offboard 自发掉线** | 受控对照各 90 s：出厂值 1 时自发丢失 **3 次**（周期 30 s、每次约 10 s，约 1/3 时间处于丢失态）；设 0 后 **0 次**。机制是 lockstep 仿真时钟比墙钟慢约 8%（每 30 s 漂 2.5 s）而 PX4 每 30 s 才校正偏移，漂移超 `COM_OF_LOSS_T` 即判 setpoint 过期。抬高 `COM_OF_LOSS_T` 无效（峰值 2.5 s，设 3.0 时好时坏）。⚠ 代价：`/fmu/out/*` 的 timestamp 变为 PX4 开机计时；真机无 lockstep，S2 需重测再决定 | 2026-07-30 | `flight/sitl/test_synct_effect.sh`，报告 `99_notes/synct1/` |
 | SITL 下可脚本化 pxh 控制台 | 用 FIFO 顶住 stdin（`exec 3>fifo`）即可发 `commander arm` / `uxrce_dds_client status` / `uorb top`。headless 下解锁需先 `param set NAV_DLL_ACT 0`，否则报 `Preflight Fail: No connection to the GCS` | 2026-07-27 | `flight/sitl/measure_inflight.sh` |
 | 6C 串口数量 | 3 个（TELEM1/2/3），**无以太网** | 2026-07-27 | PX4 官方 `flight_controller/pixhawk6c.md` |
@@ -172,9 +173,16 @@
   风险的实质变了：不再是「一上手就丢包」，而是「余量只有 40 kB/s，加任何高频话题都会吃掉它」。
   若后续要做 GNSS 拒止环境的 VIO 巡检，`vehicle_odometry`（单条 12.0 kB/s）必须保留，
   再叠加 VIO 相关话题就会重新变紧 → 届时只能换 6X（有以太网 + PAB）或坚持「机载处理完只回传结论」的现有架构
-- [2026-07-27] **风险**：ROS 2 Humble 官方配对 Gazebo Fortress，本项目用 Harmonic。基础闭环不需要 `ros_gz`（PX4 直连 gz transport，ROS 2 经 uXRCE-DDS 连 PX4），仅相机取流需要桥。届时按 AAS 的 GStreamer 方案或验证 `ros-humble-ros-gzharmonic`
+- [2026-07-27] ~~**风险**：ROS 2 Humble 官方配对 Gazebo Fortress，本项目用 Harmonic，相机取流需要桥~~
+  **[2026-07-30 已消除]** OSRF 仓库提供 Humble+Harmonic 变体 `ros-humble-ros-gzharmonic`
+  （装了 `-bridge` 与 `-image` 两个子包，`0.244.12-3jammy`）。实测 `ros_gz_image image_bridge`
+  直接可用，**25.28 fps @ 1280×960 rgb8**。不需要 AAS 的 GStreamer 方案。
+  验证脚本 `flight/sitl/test_camera_bridge.sh`，报告 `99_notes/cam1/`
 - [2026-07-27] **风险（最高）**：挤占论文时间。Q1 是论文季且在关键路径上。缓解措施是 `HARDWARE_FLIGHT_LAYER.md` §8 的「低强度并行」硬约束（每周 3-5 小时，优先安排在 v2 训练等待时段）。**每周日 review 时若发现论文进度落后于原计划，立刻暂停本模块**
-- [2026-07-27] **风险**：AMD GPU 上 Gazebo 渲染性能未知。`bootstrap_wsl2.sh` 已内置 `MESA_D3D12_DEFAULT_ADAPTER_NAME` 与 `LIBGL_ALWAYS_SOFTWARE` 兜底；最差退路是 `HEADLESS=1` 只用传感器数据不出图
+- [2026-07-27] ~~**风险**：AMD GPU 上 Gazebo 渲染性能未知，最差退路是 `HEADLESS=1` 只用传感器数据不出图~~
+  **[2026-07-30 已量化，退路用不上]** llvmpipe 纯软渲染下相机实测 **25.28 fps @ 1280×960**，
+  12 核负载仅 3.22。感知闭环在本机可行，不必降分辨率也不必换机器。
+  注意这是 headless（`gz sim -s`）离屏渲染的成绩 —— 开 GUI 另算，GUI 从来不是必需
 - [2026-07-27] **事故记录**：Kiro 在重构工作副本目录时，`Move` 失败后紧随的 `Remove-Item -Recurse` 无条件执行，误删了本仓库的本地 clone。因是零本地修改的干净 clone，重新 clone 即完全恢复，无数据损失。教训已记录：不把清理动作链在可能失败的操作之后
 - [2026-07-27] **行尾问题（已加固，但性质与初判不同）**：在本机工作区发现 `.kiro/skills/skylark-coordination/scripts/` 下 4 个 `.sh` 为 CRLF 行尾。
   用 `git ls-files --eol` 核实后确认：**仓库内(index)一直是 LF**，CRLF 是本机 `core.autocrlf=true` 在 checkout 时生成的，仓库内容本身没有缺陷。
