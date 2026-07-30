@@ -90,7 +90,10 @@
       —— 那里仍写着已撤回的 60,060 B/s / 100.3%。`STATE.md` 是共享文件，改前先与用户确认
 - [ ] [S2] 在真串口上实测 XRCE 帧开销（现在是 16 B/条的估算）。
       也可先用 socat 造 pty 对、把 client 与 agent 都切到 serial 传输，在 SITL 里先量一版
-- [ ] [S1] 实现 `skylark_autopilot_iface`：Takeoff / Land / Orbit 三个 action 的 PX4 实现
+- [x] [已完成 2026-07-30] **`skylark_autopilot_iface` 的 Takeoff action 端到端跑通**，
+      集成测试 5/5（`flight/sitl/test_takeoff_action.sh`，报告 `99_notes/tk5/`）：
+      解锁被拒回传飞控原因、正常起飞到位、中途取消后保持悬停。同时发布 `FlightHealth`
+- [ ] [S1] 补齐 `skylark_autopilot_iface` 的 Land / Orbit 两个 action（Takeoff 的骨架可复用）
 - [ ] [S1] 实现 `skylark_inspection_mode`：InspectSweep / Revisit 状态机 + 声明式任务 YAML 解析
 - [ ] [S1] 做一个光伏电站 Gazebo 世界（`sitl/worlds/`）
 - [ ] [S1] 实现 `skylark_bridge`：DetectionArray + VehicleState 时间对齐 → GeoTaggedDetection
