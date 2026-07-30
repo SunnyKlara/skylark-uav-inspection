@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://relaxng.org/ns/structure/1.0"?>
+<package format="3">
+  <name>skylark_inspection_mode</name>
+  <version>0.1.0</version>
+  <description>
+    flight 层的任务状态机：InspectSweep（割草机式扫掠）与 Revisit（降高复拍）。
+
+    它**不直接发 setpoint、不订阅 px4_msgs** —— 运动一律通过
+    skylark_autopilot_iface 的 action 驱动（offboard 的 setpoint 流必须只有
+    一个发布者，两个发布者会互相打断且日志里看不出是谁打断了谁）。
+    设计定稿见 flight/docs/INSPECTION_MODE_DESIGN.md。
+  </description>
+  <maintainer email="klara@example.invalid">Skylark Window-E</maintainer>
+  <license>AGPL-3.0-or-later</license>
+
+  <depend>rclpy</depend>
+  <depend>skylark_flight_msgs</depend>
+  <depend>skylark_flight_internal_msgs</depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

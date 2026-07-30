@@ -91,8 +91,11 @@
 - [ ] [S2] 在真串口上实测 XRCE 帧开销（现在是 16 B/条的估算）。
       也可先用 socat 造 pty 对、把 client 与 agent 都切到 serial 传输，在 SITL 里先量一版
 - [x] [已完成 2026-07-30] **`skylark_autopilot_iface` 的 Takeoff action 端到端跑通**，
-      集成测试 5/5（`flight/sitl/test_takeoff_action.sh`，报告 `99_notes/tk5/`）：
+      集成测试 5/5（原 `flight/sitl/test_takeoff_action.sh`，报告 `99_notes/tk5/`）：
       解锁被拒回传飞控原因、正常起飞到位、中途取消后保持悬停。同时发布 `FlightHealth`
+      —— 2026-07-31 该脚本已删：与 `test_flight_actions.sh` 的场景 A/B 重复，
+      独占的「起飞中途取消」已搬为后者的场景 G。删的直接原因是两份参数块已经漂
+      （一份停在 `COM_OF_LOSS_T=3.0` 且注释引用已撤回的结论）
 - [x] [已完成 2026-07-30] **Land / Orbit 两个 action 补齐**，三动作集成测试 13/13
       （`flight/sitl/test_flight_actions.sh`，报告 `99_notes/act3/`）。
       完整序列可跑：起飞 → 环绕（稳态半径误差 0.41 m）→ 返航降落（自动上锁）
@@ -110,7 +113,28 @@
       旧代码在 `SYNCT=0` 下发纪元时间，等于把飞控的 offboard 过期检测整个废掉。
       详见 `docs/OFFBOARD_CONSTRAINTS.md` §7.4。新工具：
       `flight/tools/analyze_timing_trace.py`（离线定因，自带乱序自查）
-- [ ] [S1·下一步] 实现 `skylark_inspection_mode`：InspectSweep / Revisit 状态机 + 声明式任务 YAML。
+- [x] [已完成 2026-07-31] **补上第一条「挑衅」测试**：`test_flight_actions.sh` 场景 H
+      SIGKILL 机载节点 → 断言飞控**必须**接管。实测接管延迟 **2.94 s**
+      （OFFBOARD → AUTO_RTL，容限 5 s；差值与仿真时钟离散前跳同量级）。
+      加它的直接原因：此前整套测试全绿，而飞控的 offboard 过期检测已被废掉 ——
+      A~G 验的都是「该做到的做到了」，没有一条验「该拦下的拦下了」
+- [x] [已完成 2026-07-31] **SITL 参数收成单一来源** `flight/sitl/sitl_params.sh`。
+      此前 6 个脚本各写一遍且已经漂（一份停在 `COM_OF_LOSS_T=3.0` 且注释引用已撤回的结论）。
+      顺带删掉与 `test_flight_actions.sh` 重复的 `test_takeoff_action.sh`
+- [x] [已完成 2026-07-31] **修掉 Land 的自动上锁竞态**：触地后原本固定 `sleep 2.0` 再读
+      `armed`，而 `COM_DISARM_LAND` 出厂正好 2.0 s —— 结果是抛硬币
+      （`act4`/`act5` 读到已上锁、`act6` 读到仍解锁，飞行过程完全一样）。
+      改为轮询到 8 s 上界并如实回报「触地后 X.Xs 已上锁」
+- [ ] [S1·进行中] 实现 `skylark_inspection_mode`：InspectSweep / Revisit 状态机 + 声明式任务 YAML。
+      **已交付第一步**：纯函数几何模块 `skylark_inspection_mode/geometry.py`
+      + 单测 33/33（`python3 -m pytest test -q`，0.25 s，**不需要 ROS**）。
+      刻意不 import rclpy：一是碎片时间就能推进，二是论文的离线分析脚本要复用
+      **同一份**幅宽/重叠率公式 —— 各抄一遍就会出现「论文里算的和飞机实际飞的
+      不是同一个东西」，这类错一旦发现实验得重跑，且极难察觉。
+      已覆盖：覆盖率校验（含窄视场真机相机的拒绝）、经纬度↔NED 往返互逆、
+      割草机航线蛇形相位、行数覆盖两侧边界、末行夹紧、
+      `resume_from_row = last_completed_row + 1` 的闭合关系、四类几何拒绝。
+      待做：状态机节点本体、`InspectSweep` / `Revisit`、任务 YAML。
       设计要点已从契约读出，开工前无需再摸底：
       **覆盖率校验**是硬要求 —— 幅宽 = 2·高度·tan(hfov/2)，重叠率 = 1 − 行距/幅宽，
       低于 `min_overlap` 必须回 `RESULT_REJECTED_COVERAGE` 而不是默默漏拍；
