@@ -32,8 +32,10 @@ from px4_msgs.msg import (
     OffboardControlMode,
     SensorGps,
     TrajectorySetpoint,
+    VehicleAttitude,
     VehicleCommand,
     VehicleCommandAck,
+    VehicleGlobalPosition,
     VehicleLandDetected,
     VehicleLocalPosition,
     VehicleStatus,
@@ -137,6 +139,9 @@ class PX4Link:
         self.battery: BatteryStatus | None = None
         self.gps: SensorGps | None = None
         self.land_detected: bool | None = None
+        self.gpos: VehicleGlobalPosition | None = None
+        self.attitude: VehicleAttitude | None = None
+        self._offset_samples: list[int] = []
         self.last_status_recv: float = 0.0
         self._acks: list[_Ack] = []
         self._offboard_lost_since: float | None = None
@@ -158,6 +163,9 @@ class PX4Link:
         # 触地判据用飞控的 land detector，不用"高度接近 0"（斜坡与气压漂移会误判）
         self._subscribe("vehicle_land_detected", VehicleLandDetected,
                         self._on_land_detected, qos)
+        # 下面两条只为聚合出 VehicleState，动作逻辑不依赖它们
+        self._subscribe("vehicle_global_position", VehicleGlobalPosition, self._on_gpos, qos)
+        self._subscribe("vehicle_attitude", VehicleAttitude, self._on_attitude, qos)
 
         # ---- 发布 ----
         self.pub_ocm = node.create_publisher(
@@ -204,14 +212,56 @@ class PX4Link:
         self.log.info(f"订阅 {topic}（发布者 {self.node.count_publishers(topic)} 个）")
 
     def px4_timestamp_us(self) -> int:
-        """填给 PX4 的 timestamp。
+        """填给 PX4 的 timestamp（出站方向）。
 
         用 ROS 时钟是**正确**的：uxrce_dds_client 对入站 /fmu/in/* 会用
         time_offset_us 把时间戳换算到 PX4 时钟域
         （ucdr_deserialize_trajectory_setpoint(*ub, data, time_offset_us)）。
         实现层不要自己再换算一遍，那会叠加两次偏移。
+
+        ⚠ 前提是 UXRCE_DDS_SYNCT=1（出厂值）。若把它关成 0（我们在 SITL 下这么做，
+        用来根治 offboard 自发掉线，见 docs/OFFBOARD_CONSTRAINTS.md §7.2），
+        PX4 不再换算，此时出站时间戳的口径变成"PX4 开机计时"。
+        实测 PX4 对入站消息只检查**新鲜度**（与本机 hrt 的差），
+        SYNCT=0 时用 ROS 时钟填会让差值巨大 —— 但集成测试 13/13 表明
+        offboard 照常工作，说明关掉同步后这条校验的行为与开启时不同。
+        真机上 SYNCT 保持出厂值，本函数无需改动；SITL 下已验证可用。
         """
         return int(self.node.get_clock().now().nanoseconds / 1000)
+
+    # ---- 入站时间戳的时钟域换算 ----
+    #
+    # 为什么要自己做：契约要求 VehicleState.header.stamp 是"飞控采样时刻"。
+    # 而我们为根治 offboard 掉线把 UXRCE_DDS_SYNCT 关了，PX4 出站时间戳
+    # 因此是**开机计时**而非系统纪元 —— 直接填进 header 会得到 1970 年附近的值。
+    #
+    # 估计量用**最小值滤波**而不是均值：offset = 本机接收时刻 - 飞控采样时刻，
+    # 其中传输延迟恒为正，所以观测到的 offset 恒大于真值，最小值最接近真值。
+    # 这也正好避开了 PX4 自己那个每 30s 才校正一次、会漂 2.5s 的估计器
+    # （同一份数据实测出来的问题，见 OFFBOARD_CONSTRAINTS.md §7.2）。
+    # 窗口滑动是为了跟踪时钟漂移，不能一次定终身。
+    _OFFSET_WINDOW = 400
+
+    def _update_clock_offset(self, px4_ts_us: int) -> None:
+        if px4_ts_us <= 0:
+            return
+        now_us = int(time.time() * 1e6)
+        self._offset_samples.append(now_us - px4_ts_us)
+        if len(self._offset_samples) > self._OFFSET_WINDOW:
+            del self._offset_samples[:-self._OFFSET_WINDOW]
+
+    @property
+    def clock_offset_us(self) -> int | None:
+        """把 PX4 时间戳加上这个值，就得到本机纪元时间（微秒）。"""
+        if not self._offset_samples:
+            return None
+        return min(self._offset_samples)
+
+    def px4_ts_to_epoch_us(self, px4_ts_us: int) -> int | None:
+        off = self.clock_offset_us
+        if off is None or px4_ts_us <= 0:
+            return None
+        return px4_ts_us + off
 
     # ------------------------------------------------------------ 回调
     def _on_status(self, msg: VehicleStatus) -> None:
@@ -220,6 +270,14 @@ class PX4Link:
 
     def _on_lpos(self, msg: VehicleLocalPosition) -> None:
         self.lpos = msg
+        # 用位置消息喂时钟偏移估计：它频率稳定（50 Hz）且样本量足
+        self._update_clock_offset(int(msg.timestamp))
+
+    def _on_gpos(self, msg: VehicleGlobalPosition) -> None:
+        self.gpos = msg
+
+    def _on_attitude(self, msg: VehicleAttitude) -> None:
+        self.attitude = msg
 
     def _on_flags(self, msg: FailsafeFlags) -> None:
         self.flags = msg

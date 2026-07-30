@@ -26,8 +26,9 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
+from builtin_interfaces.msg import Time as TimeMsg
 from skylark_flight_msgs.action import Land, Orbit, Takeoff
-from skylark_flight_msgs.msg import FlightHealth
+from skylark_flight_msgs.msg import FlightHealth, VehicleState
 
 from . import land as land_impl
 from . import orbit as orbit_impl
@@ -59,6 +60,10 @@ class AutopilotIface(Node):
 
         self.declare_parameter("heartbeat_hz", 10.0)
         self.declare_parameter("health_hz", 2.0)
+        # VehicleState 的频率。契约建议 10 Hz，并注明受 6C TELEM2 串口带宽限制 ——
+        # 不过那个限制作用在 PX4->机载电脑那一段，本话题是机载电脑内部转发，
+        # 真正的约束是下游消费者需要多新鲜的位姿来给检出打地理标签。
+        self.declare_parameter("state_hz", 10.0)
         self.declare_parameter("feedback_hz", 5.0)
         self.declare_parameter("offboard_loss_grace_sec", 3.0)
         self.declare_parameter("altitude_tolerance_m", 0.4)
@@ -83,9 +88,12 @@ class AutopilotIface(Node):
         )
 
         self.pub_health = self.create_publisher(FlightHealth, "~/flight_health", 10)
+        self.pub_state = self.create_publisher(VehicleState, "~/vehicle_state", 10)
         self.create_timer(1.0 / self.heartbeat_hz, self.link.tick_heartbeat,
                           callback_group=self.cbg)
         self.create_timer(1.0 / self.health_hz, self._publish_health,
+                          callback_group=self.cbg)
+        self.create_timer(1.0 / float(p("state_hz").value), self._publish_state,
                           callback_group=self.cbg)
 
         # 三个动作共用一把「忙」标志。
@@ -162,6 +170,72 @@ class AutopilotIface(Node):
         m.companion_link_ok = link.connected
         m.companion_link_age_ms = link.link_age_ms
         self.pub_health.publish(m)
+
+    # ------------------------------------------------------------ VehicleState
+    def _publish_state(self) -> None:
+        """把三条 PX4 消息聚合成飞控无关的 VehicleState。
+
+        契约明确 edge/ 不允许直接订阅 px4_msgs —— 那会把飞控类型泄漏到感知层。
+        所以聚合这件事必须发生在本包。
+        """
+        link = self.link
+        lpos = link.lpos
+        if lpos is None:
+            return
+
+        m = VehicleState()
+        # header.stamp 要求是**飞控采样时刻**，不是本地发布时刻。
+        # 关掉 UXRCE_DDS_SYNCT 之后 PX4 时间戳是开机计时，必须用自己维护的
+        # 偏移换算到本机纪元（见 PX4Link.px4_ts_to_epoch_us 的说明）。
+        # 换算不出来时退化为当前时刻，并且下游能从 position_valid 之外
+        # 看不出差别 —— 所以这里宁可用当前时刻也不填一个 1970 年的值。
+        epoch_us = link.px4_ts_to_epoch_us(int(lpos.timestamp))
+        if epoch_us is not None:
+            m.header.stamp = TimeMsg(sec=int(epoch_us // 1_000_000),
+                                     nanosec=int((epoch_us % 1_000_000) * 1000))
+        else:
+            m.header.stamp = self.get_clock().now().to_msg()
+        m.header.frame_id = "map"
+
+        m.position_ned.x = float(lpos.x)
+        m.position_ned.y = float(lpos.y)
+        m.position_ned.z = float(lpos.z)
+        m.velocity_ned.x = float(lpos.vx)
+        m.velocity_ned.y = float(lpos.vy)
+        m.velocity_ned.z = float(lpos.vz)
+
+        gpos = link.gpos
+        if gpos is not None:
+            m.latitude_deg = float(gpos.lat)
+            m.longitude_deg = float(gpos.lon)
+            m.altitude_amsl_m = float(gpos.alt)
+
+        # AGL 的来源要如实标注：有下视测距仪就用它，否则是起飞点推算，
+        # 后者在地形起伏时不可靠 —— 这一位是给下游做 GSD 计算时判断可信度的
+        if lpos.dist_bottom_valid:
+            m.altitude_agl_m = float(lpos.dist_bottom)
+            m.agl_source = VehicleState.AGL_SOURCE_RANGEFINDER
+        else:
+            m.altitude_agl_m = float(-lpos.z)
+            m.agl_source = VehicleState.AGL_SOURCE_TAKEOFF_REF
+
+        att = link.attitude
+        if att is not None:
+            # PX4 的 q 是 [w, x, y, z]，ROS 的 Quaternion 是 x/y/z/w，顺序别搞反
+            m.attitude.w = float(att.q[0])
+            m.attitude.x = float(att.q[1])
+            m.attitude.y = float(att.q[2])
+            m.attitude.z = float(att.q[3])
+
+        # heading：PX4 是 -PI..PI 弧度，契约要求 0..360 度、正北 0、顺时针为正
+        hdg = math.degrees(float(lpos.heading)) if not math.isnan(lpos.heading) else 0.0
+        m.heading_deg = float(hdg % 360.0)
+
+        m.position_valid = bool(lpos.xy_valid)
+        m.altitude_valid = bool(lpos.z_valid)
+        m.eph_m = float(lpos.eph) if not math.isnan(lpos.eph) else 0.0
+        m.epv_m = float(lpos.epv) if not math.isnan(lpos.epv) else 0.0
+        self.pub_state.publish(m)
 
     # ------------------------------------------------------------ action 回调
     def _on_takeoff_goal(self, goal_request) -> GoalResponse:

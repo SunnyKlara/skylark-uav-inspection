@@ -96,7 +96,19 @@
 - [x] [已完成 2026-07-30] **Land / Orbit 两个 action 补齐**，三动作集成测试 13/13
       （`flight/sitl/test_flight_actions.sh`，报告 `99_notes/act3/`）。
       完整序列可跑：起飞 → 环绕（稳态半径误差 0.41 m）→ 返航降落（自动上锁）
-- [ ] [S1] 实现 `skylark_inspection_mode`：InspectSweep / Revisit 状态机 + 声明式任务 YAML 解析
+- [x] [已完成 2026-07-30] **`VehicleState` 发布**（10 Hz）+ PX4→本机时钟域换算。
+      契约要求 stamp 是飞控采样时刻，而关掉 `UXRCE_DDS_SYNCT` 后 PX4 时间戳是开机计时，
+      由 iface 用最小值滤波自维护偏移换算。两种口径实测 stamp 差 0.017s / 0.004s
+      （`flight/sitl/test_vehicle_state.sh`，报告 `99_notes/vs1/`）
+- [ ] [S1·下一步] 实现 `skylark_inspection_mode`：InspectSweep / Revisit 状态机 + 声明式任务 YAML。
+      设计要点已从契约读出，开工前无需再摸底：
+      **覆盖率校验**是硬要求 —— 幅宽 = 2·高度·tan(hfov/2)，重叠率 = 1 − 行距/幅宽，
+      低于 `min_overlap` 必须回 `RESULT_REJECTED_COVERAGE` 而不是默默漏拍；
+      **扫掠是新的运动代码**（割草机式航线），三个已有 action 都不提供航点跟随，
+      可复用 Orbit 的 setpoint 步进模式；
+      **Revisit 要夹紧参数**并回传 `actual_*`，还要产出
+      `latency_goal_to_motion_ms` / `latency_goal_to_onstation_ms`
+      —— 这两个字段是论文「AI 反馈闭环延迟」实验的原始素材，实现时别漏
 - [ ] [S1] 做一个光伏电站 Gazebo 世界（`sitl/worlds/`）
 - [ ] [S1] 实现 `skylark_bridge`：DetectionArray + VehicleState 时间对齐 → GeoTaggedDetection
 - [ ] [S1 验收] 仿真机自主起飞 → 扫掠 → 检出 → 降高复拍 → 返航，全程录屏
