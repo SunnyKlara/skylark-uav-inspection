@@ -34,6 +34,7 @@ from px4_msgs.msg import (
     TrajectorySetpoint,
     VehicleCommand,
     VehicleCommandAck,
+    VehicleLandDetected,
     VehicleLocalPosition,
     VehicleStatus,
 )
@@ -68,6 +69,7 @@ ARMING_ARMED = 2
 PX4_MAIN_MODE_AUTO = 4
 PX4_MAIN_MODE_OFFBOARD = 6
 PX4_SUB_MODE_AUTO_LOITER = 3
+PX4_SUB_MODE_AUTO_RTL = 5
 PX4_SUB_MODE_AUTO_LAND = 6
 
 ACK_ACCEPTED = 0
@@ -134,6 +136,7 @@ class PX4Link:
         self.flags: FailsafeFlags | None = None
         self.battery: BatteryStatus | None = None
         self.gps: SensorGps | None = None
+        self.land_detected: bool | None = None
         self.last_status_recv: float = 0.0
         self._acks: list[_Ack] = []
         self._offboard_lost_since: float | None = None
@@ -152,6 +155,9 @@ class PX4Link:
         self._subscribe("vehicle_command_ack", VehicleCommandAck, self._on_ack, qos)
         self._subscribe("battery_status", BatteryStatus, self._on_battery, qos)
         self._subscribe("vehicle_gps_position", SensorGps, self._on_gps, qos)
+        # 触地判据用飞控的 land detector，不用"高度接近 0"（斜坡与气压漂移会误判）
+        self._subscribe("vehicle_land_detected", VehicleLandDetected,
+                        self._on_land_detected, qos)
 
         # ---- 发布 ----
         self.pub_ocm = node.create_publisher(
@@ -235,6 +241,9 @@ class PX4Link:
 
     def _on_gps(self, msg: SensorGps) -> None:
         self.gps = msg
+
+    def _on_land_detected(self, msg: VehicleLandDetected) -> None:
+        self.land_detected = bool(msg.landed)
 
     # ------------------------------------------------------------ 状态查询
     @property
@@ -446,6 +455,75 @@ class PX4Link:
     def disarm(self, timeout_sec: float = 3.0) -> CommandResult:
         return self.send_command_and_wait(
             VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, timeout_sec, param1=0.0)
+
+    def handover_to_loiter(self, reason: str, settle_sec: float = 2.0) -> tuple[bool, str]:
+        """把控制权交回飞控的 AUTO_LOITER，然后停心跳。
+
+        每个 offboard 动作的**所有**退出路径都必须走这一步（成功、失败、被取消）。
+        原因是实测的约束 5：停发 setpoint 后约 1 秒飞控触发失效保护并 AUTO_RTL
+        自动降落，约 10 秒后 "Disarmed by landing"。也就是说"什么都不做"这个
+        收尾方式的实际后果是飞机自己飞走并降落。
+
+        顺序也重要：先确认已离开 OFFBOARD 再停心跳，否则会撞上
+        「已停发 setpoint 但模式还没切过去」的窗口。
+        """
+        self.log.info(f"移交控制权到 AUTO_LOITER（{reason}）")
+        res = self.set_mode_auto_loiter()
+        if not res.accepted:
+            self.log.error(
+                f"移交 AUTO_LOITER 失败：{res.describe()}。"
+                f"继续保持心跳，以免飞机自行返航降落")
+            return (False, f"移交失败: {res.describe()}")
+        deadline = time.time() + settle_sec
+        while time.time() < deadline:
+            if not self.in_offboard:
+                break
+            time.sleep(0.05)
+        self.stop_heartbeat()
+        return (True, "已移交 AUTO_LOITER")
+
+    def set_mode_auto_land(self, timeout_sec: float = 3.0) -> CommandResult:
+        """切飞控自带的 AUTO_LAND。
+
+        刻意用飞控的降落而不是自己在 offboard 里往下压高度：
+        触地检测（land detector）与落地上锁是安全关键逻辑，PX4 那套经过大量验证，
+        自己实现只会更差。代价是 Land.action 的 descent_rate_mps 无法逐次生效
+        （由 MPC_LAND_SPEED 等参数决定），这一点在 land.py 里如实告知调用方。
+        """
+        return self.send_command_and_wait(
+            VehicleCommand.VEHICLE_CMD_DO_SET_MODE, timeout_sec,
+            param1=1.0, param2=float(PX4_MAIN_MODE_AUTO),
+            param3=float(PX4_SUB_MODE_AUTO_LAND))
+
+    def set_mode_auto_rtl(self, timeout_sec: float = 3.0) -> CommandResult:
+        return self.send_command_and_wait(
+            VehicleCommand.VEHICLE_CMD_DO_SET_MODE, timeout_sec,
+            param1=1.0, param2=float(PX4_MAIN_MODE_AUTO),
+            param3=float(PX4_SUB_MODE_AUTO_RTL))
+
+    @property
+    def landed(self) -> bool:
+        """是否已触地。用飞控的判据而不是"高度接近 0"——
+        后者在斜坡地形或气压漂移下会误判。"""
+        return bool(self.land_detected)
+
+    def global_to_ned(self, lat_deg: float, lon_deg: float) -> tuple[float, float] | None:
+        """把经纬度换算成 EKF 局部 NED 的 (north, east)。
+
+        用等距圆柱近似：巡检任务的作业半径在百米量级，这个近似的误差远小于
+        GPS 自身误差，不值得引入完整的大地投影。
+        xy_global 为假时返回 None —— 那说明 EKF 还没有全局参考，
+        此时任何经纬度输入都无法解释，必须拒绝而不是猜。
+        """
+        if not self.lpos or not self.lpos.xy_global:
+            return None
+        ref_lat = math.radians(float(self.lpos.ref_lat))
+        d_lat = math.radians(lat_deg - float(self.lpos.ref_lat))
+        d_lon = math.radians(lon_deg - float(self.lpos.ref_lon))
+        r_earth = 6371000.0
+        north = d_lat * r_earth
+        east = d_lon * r_earth * math.cos(ref_lat)
+        return (north, east)
 
     def current_ned(self) -> tuple[float, float, float]:
         if not self.lpos:

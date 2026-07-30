@@ -26,9 +26,11 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
-from skylark_flight_msgs.action import Takeoff
+from skylark_flight_msgs.action import Land, Orbit, Takeoff
 from skylark_flight_msgs.msg import FlightHealth
 
+from . import land as land_impl
+from . import orbit as orbit_impl
 from .px4_link import (
     NAV_AUTO_LAND,
     NAV_AUTO_LOITER,
@@ -86,17 +88,38 @@ class AutopilotIface(Node):
         self.create_timer(1.0 / self.health_hz, self._publish_health,
                           callback_group=self.cbg)
 
-        self._takeoff_busy = False
+        # 三个动作共用一把「忙」标志。
+        #
+        # 不是偷懒：它们都要独占 setpoint 流与飞行模式，同时跑两个必然互相打断，
+        # 而且这种打断在日志里看不出来（两边都在正常发命令）。
+        # 所以并发请求一律拒，由调用方串行编排。
+        self._busy_action: str | None = None
+
         self.takeoff_server = ActionServer(
             self, Takeoff, "~/takeoff",
             execute_callback=self._execute_takeoff,
-            goal_callback=self._on_goal,
+            goal_callback=self._on_takeoff_goal,
+            cancel_callback=self._on_cancel,
+            callback_group=self.cbg,
+        )
+        self.land_server = ActionServer(
+            self, Land, "~/land",
+            execute_callback=self._execute_land,
+            goal_callback=lambda _g: self._on_generic_goal("land"),
+            cancel_callback=self._on_cancel,
+            callback_group=self.cbg,
+        )
+        self.orbit_server = ActionServer(
+            self, Orbit, "~/orbit",
+            execute_callback=self._execute_orbit,
+            goal_callback=lambda _g: self._on_generic_goal("orbit"),
             cancel_callback=self._on_cancel,
             callback_group=self.cbg,
         )
         self.get_logger().info(
-            f"就绪：心跳 {self.heartbeat_hz} Hz，健康 {self.health_hz} Hz，"
-            f"offboard 丢失去抖 {self.link.offboard_loss_grace_sec}s")
+            f"就绪：动作 takeoff/land/orbit，心跳 {self.heartbeat_hz} Hz，"
+            f"健康 {self.health_hz} Hz，offboard 丢失去抖 "
+            f"{self.link.offboard_loss_grace_sec}s")
 
     # ------------------------------------------------------------ FlightHealth
     def _publish_health(self) -> None:
@@ -141,15 +164,20 @@ class AutopilotIface(Node):
         self.pub_health.publish(m)
 
     # ------------------------------------------------------------ action 回调
-    def _on_goal(self, goal_request) -> GoalResponse:
+    def _on_takeoff_goal(self, goal_request) -> GoalResponse:
         # 结构性问题在这里直接拒（调用方拿不到 result_code，所以只拒明显无意义的请求）；
         # 需要回传具体原因的一律接受后 abort，让 result_code 说话。
         if goal_request.altitude_agl_m <= 0.0:
             self.get_logger().warn(
                 f"拒绝：目标高度 {goal_request.altitude_agl_m} m 无意义")
             return GoalResponse.REJECT
-        if self._takeoff_busy:
-            self.get_logger().warn("拒绝：已有 Takeoff 在执行")
+        return self._on_generic_goal("takeoff")
+
+    def _on_generic_goal(self, name: str) -> GoalResponse:
+        if self._busy_action is not None:
+            self.get_logger().warn(
+                f"拒绝 {name}：{self._busy_action} 正在执行。"
+                f"三个动作都要独占 setpoint 流与飞行模式，不能并发")
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
 
@@ -181,11 +209,25 @@ class AutopilotIface(Node):
 
     # ------------------------------------------------------------ Takeoff
     def _execute_takeoff(self, goal_handle):
-        self._takeoff_busy = True
+        self._busy_action = "takeoff"
         try:
             return self._run_takeoff(goal_handle)
         finally:
-            self._takeoff_busy = False
+            self._busy_action = None
+
+    def _execute_land(self, goal_handle):
+        self._busy_action = "land"
+        try:
+            return land_impl.execute(self, goal_handle)
+        finally:
+            self._busy_action = None
+
+    def _execute_orbit(self, goal_handle):
+        self._busy_action = "orbit"
+        try:
+            return orbit_impl.execute(self, goal_handle)
+        finally:
+            self._busy_action = None
 
     def _run_takeoff(self, goal_handle):
         link = self.link
@@ -205,25 +247,9 @@ class AutopilotIface(Node):
             return r
 
         def handover(reason: str) -> None:
-            """无论成功失败都要走这一步。
-
-            停发 setpoint 不是安全收尾：实测断流约 1 秒后 PX4 触发失效保护并
-            AUTO_RTL 自动降落。必须显式移交到 AUTO_LOITER 原地悬停。
-            """
-            self.get_logger().info(f"移交控制权到 AUTO_LOITER（{reason}）")
-            res = link.set_mode_auto_loiter()
-            if not res.accepted:
-                self.get_logger().error(
-                    f"移交 AUTO_LOITER 失败：{res.describe()}。"
-                    f"仍保持心跳以免飞机自行返航降落")
-                return
-            # 确认已离开 OFFBOARD 再停心跳，否则会撞上"已停发但模式还没切"的窗口
-            deadline = time.time() + self.mode_settle
-            while time.time() < deadline:
-                if not link.in_offboard:
-                    break
-                time.sleep(0.05)
-            link.stop_heartbeat()
+            # 三个动作共用 PX4Link.handover_to_loiter，避免两份逻辑各自漂移。
+            # 所有退出路径都必须走它，理由见该方法的注释。
+            link.handover_to_loiter(reason, self.mode_settle)
 
         self.get_logger().info(
             f"Takeoff 开始：目标 {target_alt:.1f} m，上升率 {climb_rate:.1f} m/s，"

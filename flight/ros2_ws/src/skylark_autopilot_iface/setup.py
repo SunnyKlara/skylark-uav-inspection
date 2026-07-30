@@ -24,7 +24,10 @@ setup(
             # 刻意不拆成多个节点 —— offboard setpoint 流必须只有一个发布者，
             # 拆开会出现两个节点同时发 setpoint 互相打断。
             'autopilot_iface = skylark_autopilot_iface.autopilot_iface_node:main',
-            # 测试用客户端，给集成测试和手工验证用
+            # 测试用客户端，给集成测试和手工验证用。
+            # 退出码即 result_code，shell 侧可直接断言，不必 grep 文本。
+            'action_cli = skylark_autopilot_iface.action_cli:main',
+            # 保留旧名以免已有脚本失效
             'takeoff_cli = skylark_autopilot_iface.takeoff_cli:main',
         ],
     },

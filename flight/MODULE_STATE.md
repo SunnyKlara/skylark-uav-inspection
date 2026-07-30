@@ -93,7 +93,9 @@
 - [x] [已完成 2026-07-30] **`skylark_autopilot_iface` 的 Takeoff action 端到端跑通**，
       集成测试 5/5（`flight/sitl/test_takeoff_action.sh`，报告 `99_notes/tk5/`）：
       解锁被拒回传飞控原因、正常起飞到位、中途取消后保持悬停。同时发布 `FlightHealth`
-- [ ] [S1] 补齐 `skylark_autopilot_iface` 的 Land / Orbit 两个 action（Takeoff 的骨架可复用）
+- [x] [已完成 2026-07-30] **Land / Orbit 两个 action 补齐**，三动作集成测试 13/13
+      （`flight/sitl/test_flight_actions.sh`，报告 `99_notes/act3/`）。
+      完整序列可跑：起飞 → 环绕（稳态半径误差 0.41 m）→ 返航降落（自动上锁）
 - [ ] [S1] 实现 `skylark_inspection_mode`：InspectSweep / Revisit 状态机 + 声明式任务 YAML 解析
 - [ ] [S1] 做一个光伏电站 Gazebo 世界（`sitl/worlds/`）
 - [ ] [S1] 实现 `skylark_bridge`：DetectionArray + VehicleState 时间对齐 → GeoTaggedDetection
@@ -117,6 +119,7 @@
 | **XRCE 帧开销按条数摊，不按字节摊** | `dds_topics.h.em` 发送循环每条消息单独 `uxr_flash_output_streams`，源码留有 `// TODO: fill up the MTU and then flush` | 2026-07-27 | 源码 `src/modules/uxrce_dds_client/dds_topics.h.em:143` |
 | **`ros2 topic hz` / `bw` 不能用于带宽校准** | 量的是订阅端到达率。同一健康系统两轮读数 50.004 / 21.427 Hz（RTF 均为 1.0）；订阅端因 TRANSIENT_LOCAL 历史回放落后 4~18 s。正确方法见 `SERIAL_BUDGET.md` §6 | 2026-07-27 | `flight/sitl/smoke_test.sh`、`flight/tools/measure_dds_topics.py`；排查过程的一次性诊断脚本留在工作区 `99_notes/`（未入库） |
 | PX4 v1.17 话题名带版本后缀 | `dds_topics.yaml` 里无 `_v` 后缀，运行时按各消息的 `MESSAGE_VERSION` 拼：`VehicleLocalPosition`(=1)→`vehicle_local_position_v1`，`VehicleAttitude`(=0)→无后缀 | 2026-07-27 | `msg/versioned/*.msg` + 实测话题表 |
+| **`UXRCE_DDS_SYNCT=0` 可根治 offboard 自发掉线** | 受控对照各 90 s：出厂值 1 时自发丢失 **3 次**（周期 30 s、每次约 10 s，约 1/3 时间处于丢失态）；设 0 后 **0 次**。机制是 lockstep 仿真时钟比墙钟慢约 8%（每 30 s 漂 2.5 s）而 PX4 每 30 s 才校正偏移，漂移超 `COM_OF_LOSS_T` 即判 setpoint 过期。抬高 `COM_OF_LOSS_T` 无效（峰值 2.5 s，设 3.0 时好时坏）。⚠ 代价：`/fmu/out/*` 的 timestamp 变为 PX4 开机计时；真机无 lockstep，S2 需重测再决定 | 2026-07-30 | `flight/sitl/test_synct_effect.sh`，报告 `99_notes/synct1/` |
 | SITL 下可脚本化 pxh 控制台 | 用 FIFO 顶住 stdin（`exec 3>fifo`）即可发 `commander arm` / `uxrce_dds_client status` / `uorb top`。headless 下解锁需先 `param set NAV_DLL_ACT 0`，否则报 `Preflight Fail: No connection to the GCS` | 2026-07-27 | `flight/sitl/measure_inflight.sh` |
 | 6C 串口数量 | 3 个（TELEM1/2/3），**无以太网** | 2026-07-27 | PX4 官方 `flight_controller/pixhawk6c.md` |
 | 6C 端口限流 | TELEM1 独立 1.5 A，其余端口**合计** 1.5 A | 2026-07-27 | 同上 |
