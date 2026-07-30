@@ -179,6 +179,48 @@ class SweepPlan:
         return 2
 
 
+# ---------------------------------------------------------------- 行进度换算
+#
+# 这三个函数看着琐碎，但它们全是 off-by-one 的高发区，而且错了不会崩 ——
+# 只会让 last_completed_row 差一行，于是断点续飞要么漏一行要么重飞一行。
+# 放在这个不依赖 ROS 的模块里，就能被纯函数单测钉住。
+
+WAYPOINTS_PER_ROW = 2
+
+
+def rows_done(waypoints_reached: int) -> int:
+    """由 FollowPath 报回的「已到达航点数」换算出「已完成的行数」。
+
+    一行两个端点，只有两个都到了才算这行扫完 —— 只到一个端点意味着
+    这一行正飞到一半，把它算成完成会让覆盖率虚高。
+    """
+    return max(0, waypoints_reached) // WAYPOINTS_PER_ROW
+
+
+def global_row(resume_from_row: int, local_row: int) -> int:
+    """把「切片后的局部行号」还原成全局行号。
+
+    航线是按 resume_from_row 切过片的，FollowPath 只看得见切片后的序号。
+    契约的 rows_completed / last_completed_row 必须是全局编号，
+    否则 `resume_from_row = last_completed_row + 1` 这个闭合关系就不成立。
+    """
+    return resume_from_row + local_row
+
+
+def area_covered_m2(rows_done_count: int, row_spacing_m: float,
+                    row_length_m: float, area_total_m2: float) -> float:
+    """已覆盖面积的估算：完成的行数 x 行距 x 行长，上限是区域总面积。
+
+    这是**估算**，不是实测覆盖：它假设每行都按标称行距覆盖了一整条带。
+    航线跟踪误差会让真实覆盖打折，那个由 Feedback 的 cross_track_error_m 反映。
+    契约字段叫 area_covered_m2 而不是 area_swept_exactly_m2，按估算填是合适的，
+    但调用方不该拿它当验收依据 —— 这一点写在 Result.message 里说清。
+    """
+    if rows_done_count <= 0:
+        return 0.0
+    return min(rows_done_count * row_spacing_m * row_length_m, area_total_m2)
+
+
 def plan_sweep(corner_a: tuple[float, float], corner_b: tuple[float, float],
                ref: tuple[float, float], *,
                heading_deg: float, altitude_agl_m: float,
@@ -220,15 +262,26 @@ def plan_sweep(corner_a: tuple[float, float], corner_b: tuple[float, float],
         raise GeometryError(
             f"区域对角线 {diag:.0f} m 超过上限 {MAX_DIAGONAL_M:.0f} m，"
             f"疑似坐标或单位传错")
+    # 检查顺序是有讲究的，不是随手排的。
+    #
+    # 上面两条（区域退化、对角线超限）先做：那是「输入本身不成立」，
+    # 此时谈行距和覆盖率都没意义。
+    #
+    # 接着做**覆盖率**，最后才做「排不下两行」。第一版是反的，
+    # 结果行距 40 m 配 24 m 横向跨度时报的是「区域太小排不下两行」——
+    # 那个建议会把调用方推向"扩大区域"，而扩大之后照样漏拍，得再来一轮。
+    # 反过来先报覆盖率，建议是"把行距降到 26.67 m 以下"，
+    # 一次就同时解决两个问题（降了行距，24 m 跨度自然排得下）。
+    # 判据的层次是：覆盖率是**传感参数**对不对，排不下行是**区域**配不配这个参数。
+    swath, ov = check_coverage(altitude_agl_m, row_spacing_m,
+                              min_overlap, hfov_deg)
+
     # 「连两行都排不下」的判据落在**横向**跨度上：行方向短只是每行短，
     # 不影响能不能扫；横向短才会导致排不下行。
     if span_v < MIN_SIDE_ROWS * row_spacing_m:
         raise GeometryError(
             f"横向跨度 {span_v:.2f} m 不足 {MIN_SIDE_ROWS:.0f} × 行距 "
             f"{row_spacing_m:.2f} m，区域太小排不下两行")
-
-    swath, ov = check_coverage(altitude_agl_m, row_spacing_m,
-                              min_overlap, hfov_deg)
 
     # 行数：跨度切成 ceil(span/spacing) 段，端点数比段数多 1。
     # 这样首行贴 v_lo、末行贴 v_hi，两条边界都被覆盖 —— 用 floor 会漏掉末行。

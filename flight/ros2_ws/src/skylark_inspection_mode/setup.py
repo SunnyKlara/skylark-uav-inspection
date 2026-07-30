@@ -19,9 +19,14 @@ setup(
     license='AGPL-3.0-or-later',
     entry_points={
         'console_scripts': [
-            # 节点尚未实现，先只交付纯函数几何模块（geometry.py）与它的单测。
-            # 刻意分两步：几何是覆盖率保证的根，先把它钉死再接 ROS，
-            # 否则单测就得拖着 rclpy 跑，碎片时间推不动。
+            # 任务状态机。当前只注册 inspect_sweep 一个 action；
+            # Revisit 未实现时**刻意不注册桩**，让调用方直接看到"服务器不在线"
+            # 而不是拿到一个语义不明的失败码。
+            'inspection_mode = skylark_inspection_mode.inspection_mode_node:main',
+            # 测试用客户端。退出码即 result_code，输出是 key=value ——
+            # 集成测试不必解析 YAML，取消也走显式 cancel_goal_async 而不是
+            # 指望 CLI 的信号处理（实测那条路在 InspectSweep 上不生效）。
+            'sweep_cli = skylark_inspection_mode.sweep_cli:main',
         ],
     },
 )

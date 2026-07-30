@@ -18,12 +18,15 @@ from skylark_inspection_mode.geometry import (
     MONO_CAM_HFOV_DEG,
     CoverageError,
     GeometryError,
+    area_covered_m2,
     check_coverage,
+    global_row,
     latlon_to_ned,
     max_row_spacing_m,
     ned_to_latlon,
     overlap_ratio,
     plan_sweep,
+    rows_done,
     swath_width_m,
 )
 
@@ -284,3 +287,84 @@ def test_coverage_rejection_beats_row_layout():
     with pytest.raises(CoverageError):
         plan_sweep(a, b, REF, heading_deg=0.0, altitude_agl_m=2.0,
                    row_spacing_m=6.0, min_overlap=0.25, hfov_deg=HFOV)
+
+
+def test_coverage_wins_when_both_checks_would_fail():
+    """行距既超幅宽、又大到区域排不下两行 —— 必须报**覆盖率**。
+
+    这条是 SITL 实测打出来的（99_notes/isw1 场景 A）：
+    行距 40 m + 横向 24 m，第一版先命中「区域太小排不下两行」，
+    于是调用方被建议去扩大区域 —— 扩大之后照样漏拍，白跑一轮。
+    先报覆盖率才给得出一次就能修好的建议（降行距）。
+    """
+    a, b = _rect(40.0, 24.0)
+    with pytest.raises(CoverageError):
+        plan_sweep(a, b, REF, heading_deg=0.0, altitude_agl_m=15.0,
+                   row_spacing_m=40.0, min_overlap=0.25, hfov_deg=HFOV)
+
+
+def test_geometry_wins_when_only_layout_fails():
+    """反面：行距本身满足覆盖率，只是区域排不下两行 -> 必须报 GeometryError。
+
+    与上一条配成一对，确认调整顺序没把「排不下行」这条判据变成死代码。
+    """
+    a, b = _rect(40.0, 8.0)
+    with pytest.raises(GeometryError) as e:
+        plan_sweep(a, b, REF, heading_deg=0.0, altitude_agl_m=15.0,
+                   row_spacing_m=6.0, min_overlap=0.25, hfov_deg=HFOV)
+    assert "排不下" in str(e.value)
+
+
+# ---------------------------------------------------------------- 行进度换算
+#
+# 这几条看着琐碎，但换算错了不会崩 —— 只会让 last_completed_row 差一行，
+# 于是断点续飞漏一行或重飞一行，而航线本身完全正常。正是要靠单测钉住的那种错。
+
+@pytest.mark.parametrize("reached,expect", [
+    (0, 0),     # 一个航点都没到
+    (1, 0),     # 只到第 0 行的第一个端点 —— 这行还在飞，不能算完成
+    (2, 1),
+    (3, 1),
+    (10, 5),
+    (-1, 0),    # 防御：负数当 0
+])
+def test_rows_done(reached, expect):
+    assert rows_done(reached) == expect
+
+
+def test_global_row_offset():
+    assert global_row(0, 0) == 0
+    assert global_row(3, 0) == 3
+    assert global_row(3, 2) == 5
+
+
+def test_resume_closure_end_to_end():
+    """把「切片 -> 飞 -> 记账 -> 再切片」这一圈走完，确认不漏行也不重飞。
+
+    模拟：总 5 行，先从第 0 行飞完 2 行（到达 4 个航点），
+    则 last_completed_row = 1，下次 resume_from_row = 2；
+    从第 2 行切片后再飞完 3 行，全局最后完成行应是 4 = rows_total - 1。
+    """
+    full = _plan(north_m=60.0, east_m=24.0)
+    assert full.rows_total == 5
+
+    done = rows_done(4)                       # 飞到 4 个航点 = 完成 2 行
+    last_completed = global_row(0, done) - 1
+    assert last_completed == 1
+    resume = last_completed + 1
+    assert resume == 2
+
+    part = _plan(north_m=60.0, east_m=24.0, resume_from_row=resume)
+    assert part.rows_total == 5                # 全局行数不变
+    remaining_rows = part.rows_total - resume
+    assert len(part.waypoints_ned) == 2 * remaining_rows
+    done2 = rows_done(len(part.waypoints_ned))
+    assert global_row(resume, done2) - 1 == full.rows_total - 1
+
+
+def test_area_covered_is_capped_and_zero_safe():
+    p = _plan(north_m=60.0, east_m=24.0)
+    assert area_covered_m2(0, 6.0, p.row_length_m, p.area_m2) == 0.0
+    assert area_covered_m2(2, 6.0, p.row_length_m, p.area_m2) == pytest.approx(720.0)
+    # 5 行 x 6 m x 60 m = 1800 > 区域面积 1440，必须夹到区域面积
+    assert area_covered_m2(5, 6.0, p.row_length_m, p.area_m2) == pytest.approx(1440.0)

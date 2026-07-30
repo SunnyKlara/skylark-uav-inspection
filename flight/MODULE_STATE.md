@@ -125,8 +125,20 @@
       `armed`，而 `COM_DISARM_LAND` 出厂正好 2.0 s —— 结果是抛硬币
       （`act4`/`act5` 读到已上锁、`act6` 读到仍解锁，飞行过程完全一样）。
       改为轮询到 8 s 上界并如实回报「触地后 X.Xs 已上锁」
-- [ ] [S1·进行中] 实现 `skylark_inspection_mode`：InspectSweep / Revisit 状态机 + 声明式任务 YAML。
-      **已交付第一步**：纯函数几何模块 `skylark_inspection_mode/geometry.py`
+- [x] [已完成 2026-07-31] **`InspectSweep` 端到端跑通**，集成测试 24/24
+      （`flight/sitl/test_inspect_sweep.sh`，报告 `99_notes/isw3/`）。
+      这是第一条**跨两个包**的链路：任务语义在 `skylark_inspection_mode`，
+      运动在 `skylark_autopilot_iface`，中间靠层内动作 `FollowPath`。
+      实测：40×24 m 区域、行距 6 m → 5 行全完成、航程 272 m、
+      **最大横向偏差 1.49 m**、重叠率 83.1%；`resume_from_row=2` 只飞剩下 3 行且
+      `last_completed_row` 仍是全局编号 4（闭合关系成立）。
+      拒绝路径全部验到：未起飞 → `NOT_READY`、行距 40 m → `REJECTED_COVERAGE`
+      并给出「把 row_spacing_m 降到 26.67 m 以下」的可操作建议、
+      区域排不下两行 → `BAD_GEOMETRY`、中途取消 → `CANCELED`。
+      场景 F 是**挑衅测试**：把低电量阈值临时抬到 0.99，扫掠必须在起飞前就
+      `ABORTED_LOW_BATTERY` 且飞机不得进入 OFFBOARD
+- [ ] [S1·进行中] `skylark_inspection_mode` 余下部分：`Revisit` + 声明式任务 YAML。
+      **已交付**：纯函数几何模块 `skylark_inspection_mode/geometry.py`
       + 单测 33/33（`python3 -m pytest test -q`，0.25 s，**不需要 ROS**）。
       刻意不 import rclpy：一是碎片时间就能推进，二是论文的离线分析脚本要复用
       **同一份**幅宽/重叠率公式 —— 各抄一遍就会出现「论文里算的和飞机实际飞的
