@@ -160,7 +160,8 @@ def execute(node, goal_handle):
         if link.failsafe_active and not link.in_offboard:
             reasons = ", ".join(link.failsafe_reasons()) or "原因未知"
             return (Orbit.Result.RESULT_ABORTED_BY_FAILSAFE,
-                    f"飞控接管（模式 {link.nav_state_name}），原因: {reasons}")
+                    f"飞控接管（模式 {link.nav_state_name}），原因: {reasons}；"
+                    f"{link.timing_summary()}")
         if not link.armed:
             return (Orbit.Result.RESULT_ABORTED_BY_FAILSAFE,
                     f"飞行中被解除解锁，模式 {link.nav_state_name}")
@@ -170,6 +171,13 @@ def execute(node, goal_handle):
         return None
 
     if not link.in_offboard:
+        # 同 FollowPath：已解锁飞行中切 OFFBOARD 前必须等飞控确认信号在线，
+        # 否则会立刻失效保护转 AUTO_RTL。Orbit 也是飞行中动作，同样适用。
+        sig_ok, sig_msg = link.wait_offboard_signal_ready()
+        if not sig_ok:
+            link.stop_heartbeat()
+            goal_handle.abort()
+            return result(Orbit.Result.RESULT_ABORTED_BY_FAILSAFE, sig_msg)
         res = link.set_mode_offboard()
         if not res.accepted:
             link.handover_to_loiter("Orbit 切 OFFBOARD 失败", settle)

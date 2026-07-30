@@ -19,8 +19,11 @@
 from __future__ import annotations
 
 import math
+import os
 import re
+import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 from rclpy.node import Node
@@ -145,12 +148,41 @@ class PX4Link:
         self.last_status_recv: float = 0.0
         self._acks: list[_Ack] = []
         self._offboard_lost_since: float | None = None
+        # 最新一帧 vehicle_local_position 的**本机接收时刻**。
+        # 出站时间戳要相位锁定到飞控自己的时钟，就必须知道"那一帧是我什么时候拿到的"。
+        self._lpos_recv_wall: float = 0.0
+        # 时钟漂移的测量锚点：(本机接收时刻, 该帧的 PX4 时间戳)。
+        # 只记第一帧，之后拿当前帧和它比，算出 PX4 时钟相对本机的快慢。
+        self._drift_anchor: tuple[float, int] | None = None
+        # 时钟伺服的观测窗口：(本机接收时刻, 该帧的 PX4 时间戳)。
+        # 用来估飞控时钟相对本机的**速率**，好在两帧之间做外推。
+        self._clock_samples: deque[tuple[float, int]] = deque()
+        self._lpos_max_gap_s: float = 0.0
+        # 时序取证用的环形缓冲：每条心跳记下"我发了什么时间戳"，
+        # 每帧入站位置记下"飞控当时的时间戳是多少"。
+        # 出事（被判过期）时把最近这一段落盘，就能离线算出
+        # 飞控那边看到的"陈旧程度"到底是多少 —— 这是唯一能把责任
+        # 从"我们算错时间戳"和"消息没按时送到飞控"里分开的办法。
+        self._trace: deque[tuple[str, float, int]] = deque(maxlen=4000)
+        # 上面这几项由位置回调写、由心跳线程读，而位置回调在
+        # MultiThreadedExecutor + ReentrantCallbackGroup 下会并发执行。
+        # 逐项操作在 GIL 下是原子的，但"读-改-写"的组合不是，必须显式加锁。
+        self._lpos_lock = threading.Lock()
+        self._lpos_last_ts: int = 0
+        # 飞控**自己**判定 offboard 信号丢失的次数与最长持续时间。
+        # 这是唯一有权威性的判据：我们发得多勤只是我们的说法。
+        self._offboard_lost_events: int = 0
+        self._offboard_lost_max_s: float = 0.0
+        self._offboard_seen_ok: bool = False
+        self._offboard_lost_flags: list[str] = []
 
         # ---- 心跳目标 ----
         self._hb_active = False
         self._hb_target_ned = (0.0, 0.0, 0.0)   # x, y, z(下为正)
         self._hb_yaw: float | None = None
         self._hb_count = 0
+        self._hb_last_pub = 0.0
+        self._hb_max_gap_s = 0.0
 
         # ---- 订阅 ----
         self._sub_missing: list[str] = []
@@ -211,23 +243,110 @@ class PX4Link:
         self.node.create_subscription(msg_type, topic, cb, qos)
         self.log.info(f"订阅 {topic}（发布者 {self.node.count_publishers(topic)} 个）")
 
-    def px4_timestamp_us(self) -> int:
-        """填给 PX4 的 timestamp（出站方向）。
+    # 出站时间戳的口径判据。
+    #
+    # 纪元微秒在 2001 年之后就大于 1e15，而 PX4 的开机计时在正常运行时长内
+    # 远小于这个数（1e15 us = 31.7 年）。所以用它区分两种口径足够稳。
+    _EPOCH_SCALE_US = 1_000_000_000_000_000
 
-        用 ROS 时钟是**正确**的：uxrce_dds_client 对入站 /fmu/in/* 会用
-        time_offset_us 把时间戳换算到 PX4 时钟域
-        （ucdr_deserialize_trajectory_setpoint(*ub, data, time_offset_us)）。
-        实现层不要自己再换算一遍，那会叠加两次偏移。
+    # ---- 时钟伺服的三个常数 ----
+    #
+    # 为什么需要伺服而不是"拿最新一帧的时间戳直接用"：实测仿真时钟比本机快 13.5%
+    # （clock_drift_ppm，fp5 轮），所以"过了多少本机时间"换算成飞控时间要乘速率。
+    # 不乘的版本（fp5）把场景 C 从 3 个航点推进到 5 个，但仍在最后一段被判过期一次。
+    _CLOCK_WINDOW_SEC = 8.0       # 速率估计的观测跨度
+    _CLOCK_MIN_SPAN_SEC = 2.0     # 跨度不足就不敢估，按 1.0 用
+    _CLOCK_RATE_BOUNDS = (0.5, 2.0)   # 估出界外的值一律不信（丢包/重启会造出怪值）
+    # 入站断流超过这么久就停止外推。
+    # 取 5 s（> COM_OF_LOSS_T 出厂 1 s）：SITL 里几百毫秒级的入站抖动不该升级成
+    # 失效保护，而链路真死了必须能被发现 —— 后者主要由我们自己的 connected
+    # （2 s 没收到 vehicle_status 就判断开）负责，这里只是兜底。
+    _TS_FREEZE_AFTER_SEC = 5.0
 
-        ⚠ 前提是 UXRCE_DDS_SYNCT=1（出厂值）。若把它关成 0（我们在 SITL 下这么做，
-        用来根治 offboard 自发掉线，见 docs/OFFBOARD_CONSTRAINTS.md §7.2），
-        PX4 不再换算，此时出站时间戳的口径变成"PX4 开机计时"。
-        实测 PX4 对入站消息只检查**新鲜度**（与本机 hrt 的差），
-        SYNCT=0 时用 ROS 时钟填会让差值巨大 —— 但集成测试 13/13 表明
-        offboard 照常工作，说明关掉同步后这条校验的行为与开启时不同。
-        真机上 SYNCT 保持出厂值，本函数无需改动；SITL 下已验证可用。
+    def _px4_clock_rate_locked(self) -> float:
+        """飞控时钟相对本机时钟的速率（1.0 = 同速）。**调用方须持 _lpos_lock**。
+
+        只取首尾两点，所以窗口里哪怕只混进一对乱序样本，速率就会歪 ——
+        歪到 ±2 倍再乘上外推时长，足够让出站时间戳超出 COM_OF_LOSS_T。
+        这是必须持锁的直接原因，不是洁癖。
         """
-        return int(self.node.get_clock().now().nanoseconds / 1000)
+        if len(self._clock_samples) < 2:
+            return 1.0
+        (w0, t0), (w1, t1) = self._clock_samples[0], self._clock_samples[-1]
+        span = w1 - w0
+        if span < self._CLOCK_MIN_SPAN_SEC:
+            return 1.0
+        rate = ((t1 - t0) / 1e6) / span
+        lo, hi = self._CLOCK_RATE_BOUNDS
+        return rate if lo <= rate <= hi else 1.0
+
+    def px4_clock_rate(self) -> float:
+        with self._lpos_lock:
+            return self._px4_clock_rate_locked()
+
+    def px4_now_estimate_us(self) -> int | None:
+        """用飞控自己的刻度写出的"现在"。SYNCT=0 口径下才有意义。"""
+        with self._lpos_lock:
+            if not self._clock_samples:
+                return None
+            w1, t1 = self._clock_samples[-1]
+            rate = self._px4_clock_rate_locked()
+        age = max(0.0, min(time.time() - w1, self._TS_FREEZE_AFTER_SEC))
+        return t1 + int(age * rate * 1e6)
+
+    def px4_timestamp_us(self) -> int:
+        """填给 PX4 的 timestamp（出站方向）。口径**跟随飞控当前配置自动切换**。
+
+        两种口径：
+        - `UXRCE_DDS_SYNCT=1`（出厂）：uxrce_dds_client 会用 time_offset_us 把入站
+          `/fmu/in/*` 的时间戳换算到 PX4 时钟域
+          （`ucdr_deserialize_trajectory_setpoint(*ub, data, time_offset_us)`），
+          所以我们应该发**本机纪元**时间，让它去换算。自己再换一遍会叠加两次偏移。
+        - `UXRCE_DDS_SYNCT=0`（我们在 SITL 下的设置，用来压制 offboard 抖动）：
+          PX4 不做换算，直接拿我们发的数去比新鲜度。此时必须发**PX4 开机计时**，
+          否则差值是几十年量级。
+
+        判据不读参数，而是看**飞控发来的时间戳量级** —— 那是它当前口径的原话：
+        出站被换算过就是纪元级，没换算就是开机计时级。
+
+        ⚠ 这个自适应不是锦上添花，它修掉的是一个**被绿灯掩盖的安全问题**：
+        上一版无条件发本机纪元时间（约 1.785e18 us），而 SYNCT=0 时 PX4 不换算，
+        于是它看到的时间戳在未来约 5.6 万年。offboardCheck 的判据是
+            hrt_absolute_time() < timestamp + COM_OF_LOSS_T
+        右边一旦是天文数字，这个不等式恒成立 ——
+        **飞控的 offboard 过期检测被完全废掉了**，机载电脑真死了它也发现不了。
+        当时那份"集成测试 13/13"正是在这个前提下取得的，
+        旧注释还据此推断"关掉同步后这条校验的行为与开启时不同"，
+        属于把"检查失效"读成了"检查通过"。
+        教训：测试全绿不等于机制成立，尤其当被测的是"应该拦下什么"。
+
+        SYNCT=0 分支为什么是**相位锁定**而不是"本机时间减偏移"：
+        飞控那边的判据是（v1.17.0 offboardCheck.cpp:46）
+            hrt_absolute_time() < timestamp + COM_OF_LOSS_T
+        比较的双方都在 PX4 时钟域里，所以我们只需要一个"用飞控自己的刻度写出来的
+        当前时刻"。而 lockstep SITL 的仿真时钟与墙钟速率不同（见 clock_drift_ppm），
+        "本机时间 - 偏移估计" 的误差会随偏移估计的陈旧程度线性累积 ——
+        滑动窗口最小值滤波把窗口内的漂移量（8 s × 漂移率）直接变成误差，
+        起飞这种十几秒的动作看不出来，一条 60 s 的航段就够踩线。
+        直接拿飞控最新一帧的时间戳当基准，误差就被钉死在"那一帧有多旧"
+        （50 Hz 下 ≤ 20 ms），与漂移率无关。
+
+        两帧之间的外推要**乘速率**，不能按本机时间等量加：仿真时钟实测比本机快
+        13.5%，等量加会让我们的时间戳系统性偏旧。见 _px4_clock_rate。
+
+        断流后停止外推（`_TS_FREEZE_AFTER_SEC`）是为了**保住失效保护语义**：
+        入站流真断了还照着推，我们会一直造出"新鲜"的时间戳，飞控就永远发现不了
+        链路已死。停住之后飞控照常在 COM_OF_LOSS_T 后接管 —— 那正是想要的行为。
+        """
+        now_us = int(self.node.get_clock().now().nanoseconds / 1000)
+        lpos = self.lpos
+        if lpos is None:
+            return now_us
+        px4_ts = int(lpos.timestamp)
+        if px4_ts >= self._EPOCH_SCALE_US:
+            return now_us                      # SYNCT=1：发纪元时间，PX4 会换算
+        est = self.px4_now_estimate_us()        # SYNCT=0：相位锁定到飞控时钟域
+        return est if est is not None else px4_ts
 
     # ---- 入站时间戳的时钟域换算 ----
     #
@@ -242,11 +361,12 @@ class PX4Link:
     # 窗口滑动是为了跟踪时钟漂移，不能一次定终身。
     _OFFSET_WINDOW = 400
 
-    def _update_clock_offset(self, px4_ts_us: int) -> None:
+    def _update_clock_offset(self, px4_ts_us: int, recv_wall: float) -> None:
+        """由 _on_lpos 持锁调用。接收时刻由调用方传进来，不在这里再取一次
+        time.time() —— 那样取到的是"处理到这一行的时刻"，与配对的时间戳不同源。"""
         if px4_ts_us <= 0:
             return
-        now_us = int(time.time() * 1e6)
-        self._offset_samples.append(now_us - px4_ts_us)
+        self._offset_samples.append(int(recv_wall * 1e6) - px4_ts_us)
         if len(self._offset_samples) > self._OFFSET_WINDOW:
             del self._offset_samples[:-self._OFFSET_WINDOW]
 
@@ -256,6 +376,29 @@ class PX4Link:
         if not self._offset_samples:
             return None
         return min(self._offset_samples)
+
+    @property
+    def clock_drift_ppm(self) -> float | None:
+        """PX4 时钟相对本机时钟的快慢（百万分率，正=飞控走得快）。
+
+        存在的理由是**定量**：offboard 周期性掉线的整条推理链都建立在
+        "lockstep 仿真时钟与墙钟速率不同"上，但此前从没量过方向和大小，
+        于是修法只能靠试（先怪参数、再怪时间戳口径、再想抬容限）。
+        算法就是两点法：拿第一帧和当前帧，比两个时钟各自走了多少。
+        只在 SYNCT=0（出站是开机计时口径）下有意义。
+        """
+        with self._lpos_lock:
+            anchor = self._drift_anchor
+            ts_now = self._lpos_last_ts
+            wall_now = self._lpos_recv_wall
+        if anchor is None or ts_now <= 0:
+            return None
+        wall0, ts0 = anchor
+        wall_span = wall_now - wall0
+        if wall_span < 5.0:               # 跨度太短，量出来全是噪声
+            return None
+        px4_span = (ts_now - ts0) / 1e6
+        return (px4_span - wall_span) / wall_span * 1e6
 
     def px4_ts_to_epoch_us(self, px4_ts_us: int) -> int | None:
         off = self.clock_offset_us
@@ -269,9 +412,46 @@ class PX4Link:
         self.last_status_recv = time.time()
 
     def _on_lpos(self, msg: VehicleLocalPosition) -> None:
-        self.lpos = msg
-        # 用位置消息喂时钟偏移估计：它频率稳定（50 Hz）且样本量足
-        self._update_clock_offset(int(msg.timestamp))
+        """位置回调。**整段必须持锁，且只能用局部变量**。
+
+        为什么：节点用 MultiThreadedExecutor + ReentrantCallbackGroup，
+        同一个回调会被多个线程并发执行。上一版在这里先写 self._lpos_recv_wall
+        再拿它去 append，两个线程交错时就会把「A 线程的时间戳」和
+        「B 线程的接收时刻」配成一对。
+
+        这不是理论风险，是实测抓到的（99_notes/fp7/timing_trace.csv）：
+        trace 里出现相邻两帧本机间隔 **-2852 ms** 的记录，
+        分析工具据此报出"仿真时钟单次跳变 2.87 s"，差点让我把根因写成
+        仿真保真度问题。同一份乱序数据还会污染时钟伺服的速率估计
+        （_clock_samples 只取首尾两点），估歪之后出站时间戳就真的偏旧了 ——
+        这正好解释了每轮**恰好一次**、时机随机的单帧过期误判。
+        """
+        recv = time.time()
+        ts = int(msg.timestamp)
+        with self._lpos_lock:
+            # 乱序帧直接丢：它比已记录的还旧，既不该覆盖 self.lpos，
+            # 也不该进任何统计。判据用 PX4 时间戳（严格单调），
+            # 再加一道本机接收时刻的单调性兜底。
+            if ts <= self._lpos_last_ts or recv < self._lpos_recv_wall:
+                return
+            prev_recv = self._lpos_recv_wall
+            self._lpos_last_ts = ts
+            self._lpos_recv_wall = recv
+            self.lpos = msg
+            # 入站间隔也要量：出站时间戳现在锚定在入站帧上，入站一卡出站就跟着变旧。
+            # 不量这个的话，"被判过期"到底是外推算错还是入站断流，仍然只能猜。
+            if prev_recv > 0.0:
+                self._lpos_max_gap_s = max(self._lpos_max_gap_s, recv - prev_recv)
+            # 用位置消息喂时钟偏移估计：它频率稳定（50 Hz）且样本量足
+            self._update_clock_offset(ts, recv)
+            if 0 < ts < self._EPOCH_SCALE_US:
+                if self._drift_anchor is None:
+                    self._drift_anchor = (recv, ts)
+                self._clock_samples.append((recv, ts))
+                cutoff = recv - self._CLOCK_WINDOW_SEC
+                while len(self._clock_samples) > 2 and self._clock_samples[0][0] < cutoff:
+                    self._clock_samples.popleft()
+                self._trace.append(("lp", recv, ts))
 
     def _on_gpos(self, msg: VehicleGlobalPosition) -> None:
         self.gpos = msg
@@ -285,8 +465,28 @@ class PX4Link:
         if msg.offboard_control_signal_lost:
             if self._offboard_lost_since is None:
                 self._offboard_lost_since = now
+                # 只统计"飞控先确认在线、之后又丢"的事件。
+                # 动作起手时该标志本来就是真的（还没开始发心跳），
+                # 把那一段算进去的话计数恒不为 0，就没有判据价值了。
+                if self._offboard_seen_ok:
+                    self._offboard_lost_events += 1
+                    # 抓翻转瞬间的**全部**标志位。
+                    #
+                    # 为什么非要这一份快照：offboardCheck.cpp 里置
+                    # offboard_control_signal_lost 的有两条路 ——
+                    # 一条是时间戳过期，另一条是
+                    #   position && local_position_invalid  ->  offboard_available=false
+                    # 后者在源码里明确写着"这是模式需求，无需上报"，
+                    # 于是飞控不会给出任何别的原因，标志位名字还会把人往
+                    # "链路丢了"的方向带。而我们读 failsafe_flags 是 1.85 Hz 的快照，
+                    # 等到动作中止时再读，EKF 早恢复了，证据就没了。
+                    self._offboard_lost_flags = self._flag_names(msg)
+            if self._offboard_seen_ok:
+                self._offboard_lost_max_s = max(self._offboard_lost_max_s,
+                                                now - self._offboard_lost_since)
         else:
             self._offboard_lost_since = None
+            self._offboard_seen_ok = True
 
     def _on_ack(self, msg: VehicleCommandAck) -> None:
         self._acks.append(_Ack(command=int(msg.command), result=int(msg.result)))
@@ -380,7 +580,11 @@ class PX4Link:
         是 tone_alarm 的提示音，与原因无关（实测 setpoint 断流触发的失效保护，
         紧跟的照样是 battery warning）。
         """
-        f = self.flags
+        return self._flag_names(self.flags)
+
+    @staticmethod
+    def _flag_names(f) -> list[str]:
+        """列出这一帧里为真的标志位。抽成静态方法是为了能对**历史快照**用同一套口径。"""
         if not f:
             return []
         reasons = []
@@ -392,12 +596,15 @@ class PX4Link:
             reasons.append("rc_signal_lost")
         if f.battery_warning:
             reasons.append(f"battery_warning_{int(f.battery_warning)}")
-        if f.local_position_invalid:
-            reasons.append("local_position_invalid")
-        if f.global_position_invalid:
-            reasons.append("global_position_invalid")
-        if f.home_position_invalid:
-            reasons.append("home_position_invalid")
+        # 下面这几项是 offboardCheck 的"另一条路"会用到的前置条件，
+        # 必须逐个列出来，否则 offboard_signal_lost 的真实成因分不清
+        for name in ("local_position_invalid", "local_position_invalid_relaxed",
+                     "local_velocity_invalid", "local_altitude_invalid",
+                     "attitude_invalid", "angular_velocity_invalid",
+                     "global_position_invalid", "home_position_invalid",
+                     "position_accuracy_low", "navigator_failure"):
+            if getattr(f, name, False):
+                reasons.append(name)
         return reasons
 
     # ------------------------------------------------------------ 心跳
@@ -421,6 +628,84 @@ class PX4Link:
     def heartbeat_count(self) -> int:
         return self._hb_count
 
+    @property
+    def hb_max_gap_ms(self) -> float:
+        """心跳发布的最大间隔（毫秒）。
+
+        存在的理由是**定因**：offboard 信号被判丢失有两种可能来源 ——
+        我们这边的发布卡了（executor 被饿死、GIL、日志阻塞），
+        或者飞控侧的时钟/新鲜度判定出问题。
+        `COM_OF_LOSS_T` 出厂 1.0 s，10 Hz 发布下只要我们卡超过 1 s 就会被判丢失。
+        不量这个值就只能猜，而猜的两轮都没修对（先怪参数、再怪时间戳口径）。
+        """
+        return self._hb_max_gap_s * 1000.0
+
+    @property
+    def offboard_lost_events(self) -> int:
+        """本轮动作期间，飞控判定 offboard 信号丢失的**次数**（上升沿）。
+
+        与 hb_max_gap_ms 配成一对，用来把责任分清：
+        心跳间隔正常而这个数不为 0，说明问题在飞控侧的新鲜度判定（时间戳口径），
+        两个都不正常才是我们发布卡了。动作开始时归零，见 reset_hb_stats。
+        """
+        return self._offboard_lost_events
+
+    @property
+    def offboard_lost_max_sec(self) -> float:
+        return self._offboard_lost_max_s
+
+    def timing_summary(self) -> str:
+        """一行时序自证，附在 action 的 Result.message 里。
+
+        这样每一次运行都自带证据，不必事后翻日志去猜是谁的问题。
+        """
+        drift = self.clock_drift_ppm
+        drift_s = f"{drift / 10000:.2f}%" if drift is not None else "未测到"
+        snap = ("，翻转瞬间标志位: " + "/".join(self._offboard_lost_flags)
+                if self._offboard_lost_flags else "")
+        return (f"心跳最大间隔 {self.hb_max_gap_ms:.0f} ms（{self.heartbeat_count} 条）；"
+                f"入站位置最大间隔 {self._lpos_max_gap_s * 1000:.0f} ms；"
+                f"飞控判 offboard 丢失 {self._offboard_lost_events} 次"
+                f"（最长 {self._offboard_lost_max_s:.2f} s{snap}）；"
+                f"仿真时钟相对本机 {drift_s}")
+
+    def dump_timing_trace(self, path: str | None = None) -> str | None:
+        """把最近一段时序落盘（CSV）。出事时调，用于离线定因。
+
+        列：kind(hb=我发的心跳/lp=收到的位置), wall_epoch_s, px4_ts_us。
+        离线用 lp 那两列拟合出"飞控时钟随本机时间怎么走"，
+        再对每条 hb 算出飞控收到它时会算出多大的陈旧度，就能判断
+        1 s 的容限是被我们的时间戳吃掉的，还是被消息传输/调度吃掉的。
+        """
+        target = path or os.environ.get("SKYLARK_TRACE_OUT")
+        if not target or not self._trace:
+            return None
+        with self._lpos_lock:
+            snapshot = list(self._trace)
+        try:
+            with open(target, "w", encoding="utf-8") as f:
+                f.write("kind,wall_epoch_s,px4_ts_us\n")
+                for kind, wall, ts in snapshot:
+                    f.write(f"{kind},{wall:.6f},{ts}\n")
+        except OSError as exc:
+            self.log.warn(f"时序 trace 落盘失败（{target}）：{exc}")
+            return None
+        return target
+
+    def reset_hb_stats(self) -> None:
+        """归零本轮的时序统计。每个 offboard 动作起手都要调。
+
+        连 offboard 丢失计数一起清：动作开始前该标志本来就是真的
+        （还没开始发心跳），不清零的话第一个事件必然被记上，计数就失去意义。
+        """
+        self._hb_max_gap_s = 0.0
+        self._hb_last_pub = 0.0
+        self._lpos_max_gap_s = 0.0
+        self._offboard_lost_events = 0
+        self._offboard_lost_max_s = 0.0
+        self._offboard_seen_ok = False
+        self._offboard_lost_flags = []
+
     def tick_heartbeat(self) -> None:
         """定时器回调里调。
 
@@ -432,7 +717,12 @@ class PX4Link:
         """
         if not self._hb_active:
             return
+        now = time.time()
+        if self._hb_last_pub > 0.0:
+            self._hb_max_gap_s = max(self._hb_max_gap_s, now - self._hb_last_pub)
+        self._hb_last_pub = now
         ts = self.px4_timestamp_us()
+        self._trace.append(("hb", now, ts))
 
         ocm = OffboardControlMode()
         ocm.timestamp = ts
@@ -513,6 +803,29 @@ class PX4Link:
     def disarm(self, timeout_sec: float = 3.0) -> CommandResult:
         return self.send_command_and_wait(
             VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, timeout_sec, param1=0.0)
+
+    def wait_offboard_signal_ready(self, timeout_sec: float = 5.0) -> tuple[bool, str]:
+        """等到**飞控自己认为** offboard 信号在线，再去切模式。
+
+        为什么不能只靠"我发够了 N 条心跳"：那是我们这边的启发式，
+        而判定权在飞控。实测教训（2026-07-30，FollowPath 集成测试）：
+        飞机**已解锁飞行中**切 OFFBOARD 时，只要飞控此刻仍认为 offboard 信号陈旧，
+        就会立刻失效保护转 AUTO_RTL —— 那次横向偏差只有 0.50 m，跟踪毫无问题，
+        纯粹是切模式的时机不对。
+        Takeoff 之所以没暴露这个问题，是因为它在**未解锁**时切模式，
+        那时飞控不会因 offboard 信号触发失效保护。
+
+        判据直接取 failsafe_flags.offboard_control_signal_lost —— 飞控的原话。
+        """
+        deadline = time.time() + timeout_sec
+        while time.time() < deadline:
+            if self.flags is not None and not self.flags.offboard_control_signal_lost:
+                return (True, "飞控已确认 offboard 信号在线")
+            time.sleep(0.05)
+        if self.flags is None:
+            return (False, "未收到 failsafe_flags，无法确认 offboard 信号状态")
+        return (False, f"{timeout_sec:.0f}s 内飞控仍认为 offboard 信号丢失，"
+                       f"不切模式（切了会立刻触发失效保护）")
 
     def handover_to_loiter(self, reason: str, settle_sec: float = 2.0) -> tuple[bool, str]:
         """把控制权交回飞控的 AUTO_LOITER，然后停心跳。

@@ -27,9 +27,11 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
 from builtin_interfaces.msg import Time as TimeMsg
+from skylark_flight_internal_msgs.action import FollowPath
 from skylark_flight_msgs.action import Land, Orbit, Takeoff
 from skylark_flight_msgs.msg import FlightHealth, VehicleState
 
+from . import follow_path as follow_path_impl
 from . import land as land_impl
 from . import orbit as orbit_impl
 from .px4_link import (
@@ -121,6 +123,16 @@ class AutopilotIface(Node):
             self, Orbit, "~/orbit",
             execute_callback=self._execute_orbit,
             goal_callback=lambda _g: self._on_generic_goal("orbit"),
+            cancel_callback=self._on_cancel,
+            callback_group=self.cbg,
+        )
+        # 层内动作，给 skylark_inspection_mode 的扫掠用。
+        # 接口刻意放在 skylark_flight_internal_msgs 而不是契约包 —— 包名即边界，
+        # edge/ 不该有能力绕过任务语义直接指挥航线。
+        self.follow_path_server = ActionServer(
+            self, FollowPath, "~/follow_path",
+            execute_callback=self._execute_follow_path,
+            goal_callback=lambda _g: self._on_generic_goal("follow_path"),
             cancel_callback=self._on_cancel,
             callback_group=self.cbg,
         )
@@ -303,6 +315,13 @@ class AutopilotIface(Node):
         finally:
             self._busy_action = None
 
+    def _execute_follow_path(self, goal_handle):
+        self._busy_action = "follow_path"
+        try:
+            return follow_path_impl.execute(self, goal_handle)
+        finally:
+            self._busy_action = None
+
     def _run_takeoff(self, goal_handle):
         link = self.link
         g = goal_handle.request
@@ -430,8 +449,11 @@ class AutopilotIface(Node):
             if link.failsafe_active and link.nav_state not in (NAV_OFFBOARD,):
                 reasons = ", ".join(link.failsafe_reasons()) or "原因未知"
                 goal_handle.abort()
+                # 附时序自证：这里报的原因是"飞控为什么接管"，
+                # 而"是谁的问题"要看心跳/入站间隔和飞控自己的丢失计数
                 return result(Takeoff.Result.RESULT_ABORTED_BY_FAILSAFE,
-                              f"飞控接管（模式 {link.nav_state_name}），原因: {reasons}")
+                              f"飞控接管（模式 {link.nav_state_name}），原因: {reasons}；"
+                              f"{link.timing_summary()}")
 
             if not link.armed:
                 goal_handle.abort()

@@ -88,21 +88,29 @@ for i in $(seq 1 180); do
 done
 log "就绪，等 12s 让 EKF2 收敛"; sleep 12
 echo "param set COM_LOW_BAT_ACT 0" >&3; sleep 2
-# 关掉 uXRCE-DDS 的时间戳同步 —— 这是 offboard 自发掉线的**根治**手段。
+# 关掉 uXRCE-DDS 的时间戳同步 —— 压制 offboard 自发掉线的手段之一。
 #
-# lockstep SITL 的仿真时钟比墙钟慢约 8%（实测每 30s 漂 2.5s），而 PX4 的偏移估计
-# 每 30s 才校正一次。漂移一旦超过 COM_OF_LOSS_T，入站 setpoint 就被判过期，
-# 飞控切 AUTO_RTL 接管。对照实验（flight/sitl/test_synct_effect.sh）：
+# 对照实验（flight/sitl/test_synct_effect.sh，原始数据 99_notes/synct1）：
 #   SYNCT=1 -> 90s 内自发丢失 3 次（周期 30s，每次持续约 10s）
 #   SYNCT=0 -> 90s 内 0 次
-# 抬高 COM_OF_LOSS_T 只是把边界往后挪（漂移峰值 2.5s，设 3.0s 时好时坏，实测过），
-# 关掉换算才是解决。
 # ⚠ 代价：SYNCT=0 后 /fmu/out/* 的 timestamp 是 PX4 开机计时而非系统纪元，
-#   任何拿它跟墙钟直接相减的工具都要改口径。
+#   任何拿它跟墙钟直接相减的工具都要改口径；出站方向也要改成 PX4 刻度
+#   （px4_link 的时钟伺服负责，见 OFFBOARD_CONSTRAINTS.md §7.4）。
 # ⚠ 该参数 reboot_required，必须设完保存并重启 PX4 才生效 —— 所以这里要两次启动。
 echo "param set UXRCE_DDS_SYNCT 0" >&3; sleep 2
+# 抬 setpoint 断流容限。这一条是 2026-07-31 补的，起因值得记住：
+#
+# 本脚本此前在**出厂容限 1.0 s** 下拿到 13/13，看着比现在更好 ——
+# 但那是假的。当时 px4_link 无条件发本机纪元时间（1.785e18 us），
+# SYNCT=0 下 PX4 不换算，于是它看到的时间戳在未来约 5.6 万年，
+# offboardCheck 的 `hrt_now < timestamp + COM_OF_LOSS_T` 恒成立 ——
+# **飞控的 offboard 过期检测被整个废掉了**，所以怎么跑都不会丢。
+# 出站时间戳改成锚定飞控时钟之后该检测恢复有效，代价是 lockstep 仿真时钟的
+# 离散前跳（实测单次 1.93 s）会真的触发它。故按观测跳变幅度设 5.0 s。
+# ⚠ 真机不该有这种跳变，S2 必须重新评估，不要照搬。
+echo "param set COM_OF_LOSS_T 5.0" >&3; sleep 2
 echo "param save" >&3; sleep 2
-log "已设 COM_LOW_BAT_ACT=0, UXRCE_DDS_SYNCT=0（需重启生效），重启 PX4"
+log "已设 COM_LOW_BAT_ACT=0, UXRCE_DDS_SYNCT=0, COM_OF_LOSS_T=5.0（需重启生效），重启 PX4"
 
 exec 3>&-
 kill -TERM "$PX4_PID" 2>/dev/null; sleep 3
@@ -120,11 +128,26 @@ for i in $(seq 1 180); do
   sleep 1
 done
 sleep 12
-echo "param show UXRCE_DDS_SYNCT" >&3; sleep 2
-echo "param show NAV_DLL_ACT" >&3; sleep 2
+# 读回并**断言**，不只是打印。
+# 上一版只打印两个参数，于是"参数没生效"这个可能永远排除不掉；
+# COM_OF_LOSS_T 更是必须验 —— 整套结论都建立在它被抬到 5.0 上。
+MARK=$(wc -c < "$PX4_LOG")
+for p in UXRCE_DDS_SYNCT NAV_DLL_ACT COM_OF_LOSS_T; do
+  echo "param show $p" >&3; sleep 2
+done
+PARAMS=$(tail -c "+${MARK}" "$PX4_LOG" | sed 's/pxh> //g' \
+         | grep -oE '[+*x ] +(COM|NAV|UXRCE)_[A-Z0-9_]+ \[[0-9,]+\] : [-0-9.]+' \
+         | sed 's/^[+*x ] *//')
 log "重启后参数确认："
-clean_px4_log | grep -oE '[+*x ] +(UXRCE_DDS_SYNCT|NAV_DLL_ACT) \[[0-9,]+\] : [0-9]+' \
-  | tail -2 | sed 's/^/       /' | tee -a "$REPORT"
+echo "$PARAMS" | sed 's/^/       /' | tee -a "$REPORT"
+# NAV_DLL_ACT 这里期望的是**出厂 2** —— 场景 A 靠它成立，别写成 0
+for expect in "UXRCE_DDS_SYNCT.*: 0" "NAV_DLL_ACT.*: 2" "COM_OF_LOSS_T.*: 5"; do
+  if echo "$PARAMS" | grep -qE "$expect"; then
+    ok "参数生效: ${expect%%.*}"
+  else
+    bad "参数未生效: ${expect%%.*} —— 后续结论不可信"
+  fi
+done
 
 wait_node_ready() {
   local deadline=$((SECONDS + 45)) v

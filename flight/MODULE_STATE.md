@@ -100,6 +100,16 @@
       契约要求 stamp 是飞控采样时刻，而关掉 `UXRCE_DDS_SYNCT` 后 PX4 时间戳是开机计时，
       由 iface 用最小值滤波自维护偏移换算。两种口径实测 stamp 差 0.017s / 0.004s
       （`flight/sitl/test_vehicle_state.sh`，报告 `99_notes/vs1/`）
+- [x] [已完成 2026-07-31] **`FollowPath` 内部动作**（层内接口包 `skylark_flight_internal_msgs`，
+      不进契约包、不暴露给 `edge/`）。扫掠的运动基础：目标点沿航段匀速前移，
+      跟踪方式与 Orbit 同一模式。集成测试 12/12
+      （`flight/sitl/test_follow_path.sh`，报告 `99_notes/fp10/`）：
+      3 行割草机航线 6/6 航点、航程 134 m、**最大横向偏差 1.48 m**、飞控零丢失
+- [x] [已完成 2026-07-31] **offboard 单帧误判定因 + 修掉一个被绿灯掩盖的安全问题**。
+      出站时间戳改为锚定飞控时钟的伺服（平稳期滞后 −45~+7 ms）；
+      旧代码在 `SYNCT=0` 下发纪元时间，等于把飞控的 offboard 过期检测整个废掉。
+      详见 `docs/OFFBOARD_CONSTRAINTS.md` §7.4。新工具：
+      `flight/tools/analyze_timing_trace.py`（离线定因，自带乱序自查）
 - [ ] [S1·下一步] 实现 `skylark_inspection_mode`：InspectSweep / Revisit 状态机 + 声明式任务 YAML。
       设计要点已从契约读出，开工前无需再摸底：
       **覆盖率校验**是硬要求 —— 幅宽 = 2·高度·tan(hfov/2)，重叠率 = 1 − 行距/幅宽，
@@ -132,7 +142,10 @@
 | **`ros2 topic hz` / `bw` 不能用于带宽校准** | 量的是订阅端到达率。同一健康系统两轮读数 50.004 / 21.427 Hz（RTF 均为 1.0）；订阅端因 TRANSIENT_LOCAL 历史回放落后 4~18 s。正确方法见 `SERIAL_BUDGET.md` §6 | 2026-07-27 | `flight/sitl/smoke_test.sh`、`flight/tools/measure_dds_topics.py`；排查过程的一次性诊断脚本留在工作区 `99_notes/`（未入库） |
 | PX4 v1.17 话题名带版本后缀 | `dds_topics.yaml` 里无 `_v` 后缀，运行时按各消息的 `MESSAGE_VERSION` 拼：`VehicleLocalPosition`(=1)→`vehicle_local_position_v1`，`VehicleAttitude`(=0)→无后缀 | 2026-07-27 | `msg/versioned/*.msg` + 实测话题表 |
 | **相机取流可行,软渲染下 25 fps** | gz 话题 `/world/default/model/x500_mono_cam_0/link/camera_link/sensor/imager/image`；`ros_gz_image image_bridge`（`ros-humble-ros-gzharmonic` 0.244.12-3jammy）桥到同名 ROS 2 话题；**25.28 fps @ 1280×960 rgb8**，llvmpipe 软渲染，12 核负载 3.22。机型用 `gz_x500_mono_cam`（PX4 自带，另有 depth/gimbal/lidar 变体） | 2026-07-30 | `flight/sitl/test_camera_bridge.sh`，报告 `99_notes/cam1/` |
-| **`UXRCE_DDS_SYNCT=0` 可根治 offboard 自发掉线** | 受控对照各 90 s：出厂值 1 时自发丢失 **3 次**（周期 30 s、每次约 10 s，约 1/3 时间处于丢失态）；设 0 后 **0 次**。机制是 lockstep 仿真时钟比墙钟慢约 8%（每 30 s 漂 2.5 s）而 PX4 每 30 s 才校正偏移，漂移超 `COM_OF_LOSS_T` 即判 setpoint 过期。抬高 `COM_OF_LOSS_T` 无效（峰值 2.5 s，设 3.0 时好时坏）。⚠ 代价：`/fmu/out/*` 的 timestamp 变为 PX4 开机计时；真机无 lockstep，S2 需重测再决定 | 2026-07-30 | `flight/sitl/test_synct_effect.sh`，报告 `99_notes/synct1/` |
+| **`UXRCE_DDS_SYNCT=0` 能显著减少 offboard 自发掉线（但不是根治）** | 受控对照各 90 s：出厂值 1 时自发丢失 **3 次**（周期 30 s、每次约 10 s）；设 0 后 **0 次**（该轮未解锁）。⚠ 原先写在这里的机制「仿真时钟比墙钟慢约 8%」**方向与性质都错，已撤回**，更正见下一行；「抬高 `COM_OF_LOSS_T` 无效」的结论**也已撤回**（当时出站时间戳本身是错的，不构成公平检验）。⚠ 代价：`/fmu/out/*` 的 timestamp 变为 PX4 开机计时，出站方向也要改成 PX4 刻度；真机无 lockstep，S2 需重测再决定 | 2026-07-30（2026-07-31 修正） | `flight/sitl/test_synct_effect.sh`，报告 `99_notes/synct1/` |
+| **lockstep 仿真时钟会离散前跳，实测单次 1.93 s** | 相邻两帧 `/fmu/out/vehicle_local_position_v1` 之间，本机走 **7 ms**、飞控走 **1936 ms**。平稳期速率只差 0.3%（不是持续漂移）。跳变一旦超过 `COM_OF_LOSS_T`，任何由发送端填写的时间戳都会在那一瞬间被判过期 —— 发送端无法规避，属仿真保真度问题。SITL 处置：`COM_OF_LOSS_T=5.0`（高于观测跳变）。⚠ 仍有未结事件：`fp8`/`fp9` 各一次丢失未在 trace 窗口内抓到跳变，见 §7.4 开放问题 | 2026-07-31 | `flight/tools/analyze_timing_trace.py` + `99_notes/fp8`、`fp9` 的 `timing_trace.csv` |
+| **旧代码把飞控的 offboard 过期检测整个废掉了（已修）** | `px4_link` 曾无条件发本机纪元时间（1.785e18 us）；`SYNCT=0` 下 PX4 不换算，于是它看到的时间戳在未来约 **5.6 万年**，`offboardCheck` 的 `hrt_now < timestamp + COM_OF_LOSS_T` 恒成立。当时「集成测试 13/13」正是在这个前提下取得的。**教训：测试全绿不等于机制成立，尤其当被测的是「应该拦下什么」** | 2026-07-31 | `offboardCheck.cpp:46`（v1.17.0）+ `git show HEAD~1` 的 `px4_timestamp_us` |
+| **给排障用的埋点本身也要按并发安全写** | 节点用 `MultiThreadedExecutor` + `ReentrantCallbackGroup`，位置回调并发执行；`px4_link` 曾在回调里先写实例字段再拿它配对，导致 trace 出现相邻帧本机间隔 **−2852 ms** 的样本，并把时钟速率估计带歪（一度误报漂移 8%~13%、假跳变 2.87 s）。加锁 + 丢弃乱序帧后重测才得到可信数字 | 2026-07-31 | `99_notes/fp7` vs `fp8` 的 `trace_analysis.txt` 对比 |
 | SITL 下可脚本化 pxh 控制台 | 用 FIFO 顶住 stdin（`exec 3>fifo`）即可发 `commander arm` / `uxrce_dds_client status` / `uorb top`。headless 下解锁需先 `param set NAV_DLL_ACT 0`，否则报 `Preflight Fail: No connection to the GCS` | 2026-07-27 | `flight/sitl/measure_inflight.sh` |
 | 6C 串口数量 | 3 个（TELEM1/2/3），**无以太网** | 2026-07-27 | PX4 官方 `flight_controller/pixhawk6c.md` |
 | 6C 端口限流 | TELEM1 独立 1.5 A，其余端口**合计** 1.5 A | 2026-07-27 | 同上 |
