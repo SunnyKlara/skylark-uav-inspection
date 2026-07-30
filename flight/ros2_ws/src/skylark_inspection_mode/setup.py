@@ -27,6 +27,9 @@ setup(
             # 集成测试不必解析 YAML，取消也走显式 cancel_goal_async 而不是
             # 指望 CLI 的信号处理（实测那条路在 InspectSweep 上不生效）。
             'sweep_cli = skylark_inspection_mode.sweep_cli:main',
+            # Revisit 的两个延迟字段是论文原始素材，单独打成 key=value 行，
+            # 好让实验脚本直接采集而不必解析 message
+            'revisit_cli = skylark_inspection_mode.revisit_cli:main',
         ],
     },
 )

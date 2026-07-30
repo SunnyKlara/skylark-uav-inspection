@@ -137,7 +137,22 @@
       区域排不下两行 → `BAD_GEOMETRY`、中途取消 → `CANCELED`。
       场景 F 是**挑衅测试**：把低电量阈值临时抬到 0.99，扫掠必须在起飞前就
       `ABORTED_LOW_BATTERY` 且飞机不得进入 OFFBOARD
-- [ ] [S1·进行中] `skylark_inspection_mode` 余下部分：`Revisit` + 声明式任务 YAML。
+- [x] [已完成 2026-07-31] **`Revisit`（降高复拍）跑通**，集成测试 23/23
+      （`flight/sitl/test_revisit.sh`，报告 `99_notes/rv2/`）。
+      这是「AI 反馈控制飞行决策」叙事的载体，**两个延迟字段是论文原始素材**：
+      实测 `latency_goal_to_motion_ms` ≈ **2.19 s**（三轮 2194/2197/2194 ms，
+      主要由 FollowPath 的 15 拍 setpoint 预热 + 模式切换沉降构成）、
+      `latency_goal_to_onstation_ms` 从 14.6 m 降到 3 m 时 **14.0 s**、
+      从 14.3 m 降到 6 m 时 **10.6 s**（降速 1 m/s）。
+      安全边界全部验到：请求 0.5 m → 抬到下限 3.0 m 并留痕、连拍 99 → 压到 20、
+      同点 30 s 内重复 → `REJECTED_RATE_LIMITED`、偏移 69 m → `REJECTED_UNSAFE`
+      （**拒绝而非夹紧**，夹了就是去拍一个调用方没要求的位置）、
+      下降途中取消 → `CANCELED` 且停在当前高度。
+      降高被表达成一条**纯垂直航段**，为此把 `FollowPath` 的到达判定与航段长度
+      从二维改成三维（二维下垂直航段长度为 0，会被判「立即到达」、飞机俯冲）；
+      `FollowPath` 12/12 与 `InspectSweep` 24/24 回归均通过
+- [ ] [S1·进行中] `skylark_inspection_mode` 余下部分：扫掠中自动插入 Revisit
+      （依赖 Window-A 的 `DetectionArray`）、拍摄触发、声明式任务 YAML。
       **已交付**：纯函数几何模块 `skylark_inspection_mode/geometry.py`
       + 单测 33/33（`python3 -m pytest test -q`，0.25 s，**不需要 ROS**）。
       刻意不 import rclpy：一是碎片时间就能推进，二是论文的离线分析脚本要复用

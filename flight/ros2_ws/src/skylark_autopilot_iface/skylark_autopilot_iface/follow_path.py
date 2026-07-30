@@ -121,7 +121,9 @@ def execute(node, goal_handle):
     speed = float(g.speed_mps)
     accept = float(g.accept_radius_m)
     timeout = float(g.timeout_sec) if g.timeout_sec > 0 else 600.0
-    total_len = sum(math.dist(wps[i][:2], wps[i + 1][:2]) for i in range(len(wps) - 1))
+    # 三维总长，与 seg_len 同口径（progress 是按已飞距离占总航程算的，
+    # 两边口径不一致会让纯垂直航段的进度算出 >1 或恒 0）
+    total_len = sum(math.dist(wps[i], wps[i + 1]) for i in range(len(wps) - 1))
 
     log.info(f"FollowPath 开始：{len(wps)} 个航点（从 {idx} 起），"
              f"速度 {speed:.1f} m/s，到达半径 {accept:.1f} m，总航程 {total_len:.0f} m")
@@ -219,16 +221,26 @@ def execute(node, goal_handle):
                           f"{timeout:.0f}s 内只到达 {reached}/{len(wps)} 个航点")
 
         pos = link.current_ned()
+        # distance_flown_m 刻意保持**二维**（地面航迹长度）：
+        # 它的消费者是覆盖率与航程核算，那里关心的是走过多少地面，
+        # 不是上下起伏累加了多少。与 seg_len 的三维口径不同是有意的。
         dist_flown += math.dist(pos[:2], last_pos[:2])
         last_pos = pos
 
-        seg_len = math.dist(seg_a[:2], seg_b[:2])
+        # 航段长度与到达判定都用**三维**距离，横向偏差仍是二维（那是它的定义）。
+        #
+        # 为什么必须三维：Revisit 的"原地降高"就是一条纯垂直航段
+        # （XY 不变、只降 z）。二维口径下这条航段长度为 0、飞机到航点的
+        # 二维距离也为 0，于是会被判"立即到达"——目标点一步跳到底，
+        # 飞机以最大速率俯冲，而动作立刻报完成。
+        # 对水平扫掠没有影响：那里 z 恒定，三维等于二维。
+        seg_len = math.dist(seg_a, seg_b)
         xte = _cross_track_error(pos[:2], seg_a[:2], seg_b[:2])
         max_xte = max(max_xte, xte)
 
         # 到达判定用**飞机到航点的实际距离**，不是"目标点走到头了"。
         # 目标点是我们自己推的，它到达不代表飞机到达。
-        dist_to_wp = math.dist(pos[:2], seg_b[:2])
+        dist_to_wp = math.dist(pos, seg_b)
         if dist_to_wp <= accept:
             reached += 1
             idx += 1
