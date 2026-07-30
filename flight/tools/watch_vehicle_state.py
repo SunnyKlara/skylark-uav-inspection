@@ -196,6 +196,11 @@ def main() -> int:
 
     if args.label:
         print(f"--- {args.label} ---", flush=True)
+    # 打出 t0 的绝对时刻。时间线里的相对秒数本身没法和外部事件对齐 ——
+    # 「SIGKILL 机载节点之后多久飞控才接管」这种测量必须知道 t0 在墙钟上的位置。
+    # 别用「启动脚本前记一次 date」来估：rclpy 初始化 + 话题解析要 1~2 秒，
+    # 对一个 5 秒量级的测量来说这个误差不可接受。
+    print(f"t0_epoch={w.t0:.6f}", flush=True)
     print("状态时间线：", flush=True)
 
     period = 1.0 / max(args.hz, 0.1)

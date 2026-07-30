@@ -14,6 +14,8 @@ set -uo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
 TOOLS="${REPO_ROOT}/flight/tools"
+# SITL 参数的单一来源（值与理由都写在那里，不要在本文件里再写死数字）
+source "${SCRIPT_DIR}/sitl_params.sh"
 
 OUT="${1:-/tmp/skylark_followpath}"
 mkdir -p "$OUT"
@@ -72,41 +74,10 @@ for i in $(seq 1 200); do
   sleep 1
 done
 sleep 12
-echo "param set COM_LOW_BAT_ACT 0" >&3; sleep 2
+# 参数与理由都在 sitl_params.sh。本脚本额外要 NAV_DLL_ACT=0：
+# 所有场景都在空中跑，不需要「无地面站挡解锁」这个前置条件。
 echo "param set NAV_DLL_ACT 0" >&3; sleep 2
-# 关时间戳同步：lockstep 下 PX4 偏移估计每 30s 才校正、期间漂 2.5s，
-# 会让 offboard 周期性掉线（见 OFFBOARD_CONSTRAINTS.md §7.2）。需重启生效。
-echo "param set UXRCE_DDS_SYNCT 0" >&3; sleep 2
-# 抬 setpoint 断流容限到 5 s。这是**仿真侧补偿**，不是实现修复 —— 依据如下。
-#
-# 飞控的判据（v1.17.0 offboardCheck.cpp:46）：
-#     hrt_absolute_time() < offboard_control_mode.timestamp + COM_OF_LOSS_T
-# 两边都在 PX4 时钟域，所以发送端必须用飞控的刻度写时间戳。
-#
-# 走到"抬容限"这一步之前，先按顺序排除了三件事，每件都有实测数据：
-#   1. 发布端卡顿   —— 心跳最大间隔 101~148 ms（10 Hz 名义 100 ms），排除。
-#   2. 时间戳算错   —— 出站时间戳改成锚定飞控最新一帧后（px4_link 的时钟伺服），
-#      时钟平稳期间的滞后只有 -45 ~ +7 ms，即容限的 0.5%~0.7%。
-#      两轮独立测量（99_notes/fp8、fp9，tools/analyze_timing_trace.py），排除。
-#   3. EKF 那条路径 —— offboardCheck 里还有一条
-#      `position && local_position_invalid -> 不可用`，而且源码注明"无需上报"，
-#      所以标志位名字会骗人。抓了翻转瞬间的完整标志位快照，
-#      只有 offboard/gcs/rc 三项，没有任何 *_invalid，排除。
-#   ⚠ 顺带修掉一个自己的真 bug：位置回调在 MultiThreadedExecutor 下并发执行，
-#     无锁写共享时序状态，trace 里出现过本机间隔 -2852 ms 的乱序样本，
-#     还把时钟速率估计带歪（曾误报漂移 8~13%）。加锁后重测才有上面的数字。
-#
-# 排除完剩下的是环境：实测抓到仿真时钟**单次前跳 1.93 s**
-# （相邻两帧位置消息之间，本机走 7 ms，飞控走 1936 ms，见 fp9 的 trace 分析）。
-# 跳变一旦超过容限，任何由发送端填写的时间戳都会在那一瞬间被判过期 ——
-# 发送端无法规避。所以把容限设在观测到的跳变之上。
-#
-# ⚠ 代价与边界：真机上这等于机载电脑失联后多盲飞 4 秒。
-#   真机时钟不 lockstep、不该有这种跳变，所以**S2 必须重新评估**，不要照搬。
-#   另：fp8/fp9 还各有一次未能在 trace 窗口内抓到跳变的丢失事件，
-#   仍是未结的开放问题，记在 OFFBOARD_CONSTRAINTS.md §7.4。
-echo "param set COM_OF_LOSS_T 5.0" >&3; sleep 2
-echo "param save" >&3; sleep 2
+sitl_params_apply 3
 exec 3>&-
 kill -TERM "$PX4_PID" 2>/dev/null; sleep 3
 pkill -9 -f px4_sitl 2>/dev/null; pkill -9 -f 'bin/px4' 2>/dev/null
@@ -122,24 +93,11 @@ done
 sleep 12
 # 读回验证，而不是打印一句"参数就绪"就往下走。
 # 第一版只打印不验证，结果一个真失败（offboard 被接管）无法排除"参数没生效"这个可能，
-# 白白多花一轮。param show 的值行形如： x   UXRCE_DDS_SYNCT [991,1877] : 0
-MARK=$(wc -c < "$PX4_LOG")
-for p in NAV_DLL_ACT COM_LOW_BAT_ACT UXRCE_DDS_SYNCT COM_OF_LOSS_T; do
-  echo "param show $p" >&3; sleep 1.5
-done
-sleep 2
-PARAMS=$(tail -c "+${MARK}" "$PX4_LOG" | sed 's/pxh> //g' \
-         | grep -oE '[+*x ] +(COM|NAV|UXRCE)_[A-Z0-9_]+ \[[0-9,]+\] : [-0-9.]+' \
-         | sed 's/^[+*x ] *//')
+# 白白多花一轮。
+PARAMS=$(sitl_params_readback 3 "$PX4_LOG" NAV_DLL_ACT)
 log "参数读回："
 echo "$PARAMS" | sed 's/^/       /' | tee -a "$REPORT"
-for expect in "NAV_DLL_ACT.*: 0" "COM_LOW_BAT_ACT.*: 0" "UXRCE_DDS_SYNCT.*: 0" "COM_OF_LOSS_T.*: 5"; do
-  if echo "$PARAMS" | grep -qE "$expect"; then
-    ok "参数生效: ${expect%%.*}"
-  else
-    bad "参数未生效: ${expect%%.*} —— 后续结论不可信"
-  fi
-done
+sitl_params_assert "$PARAMS" "NAV_DLL_ACT.*: 0"
 
 wait_node_ready() {
   local deadline=$((SECONDS + 45)) v

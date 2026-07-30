@@ -31,6 +31,19 @@ from skylark_flight_msgs.action import Land
 
 from .px4_link import NAV_AUTO_LAND, NAV_AUTO_RTL, PX4Link
 
+# 触地之后等自动上锁的上限（秒）。
+#
+# 为什么是"轮询到上界"而不是"睡固定 2 秒"：PX4 的 COM_DISARM_LAND 出厂正好是
+# 2.0 s，睡 2.0 s 等于把判定压在边界上 —— 实测就是个抛硬币：
+# 99_notes/act4、act5 两轮读到"已上锁"，act6 读到"仍解锁"，
+# 而三轮的飞行过程完全一样。改成轮询后 act7 量到的实际值是**触地后 2.0 s**
+# —— 正压在旧代码那个固定 sleep 的边界上，所以谁赢纯看调度。
+# Result.disarmed 是调用方判断"飞机是否安全"的依据，不能随机。上界给 8 s：容得下出厂 2 s 加上 lockstep 仿真时钟的离散前跳
+# （实测单次 1.93 s，见 OFFBOARD_CONSTRAINTS.md §7.4），又不至于把
+# "配置成不自动上锁"的情况拖成超时 —— 那种情况如实报"仍解锁"就好。
+DISARM_WAIT_MAX_SEC = 8.0
+DISARM_POLL_SEC = 0.1
+
 
 def preflight_reject(link: PX4Link) -> tuple[int, str] | None:
     """返回 (result_code, message) 表示该拒；None 表示可继续。"""
@@ -116,9 +129,19 @@ def execute(node, goal_handle):
         # 成功判据：飞控报告触地。上锁与否单独放进 Result.disarmed，
         # 因为 COM_DISARM_LAND 可能配成不自动上锁，那时"没上锁"不等于"没降落成功"
         if link.landed:
-            # 给飞控一点时间完成自动上锁再读 disarmed
-            time.sleep(2.0)
-            msg = f"已降落（{mode_name}），{'已上锁' if not link.armed else '仍解锁'}。{param_note}"
+            # 等飞控完成自动上锁再读 disarmed —— 轮询到上界，不睡固定秒数，
+            # 理由见 DISARM_WAIT_MAX_SEC 处的注释（固定 2 s 正好压在
+            # COM_DISARM_LAND 的出厂值上，结果是随机的）。
+            t_touch = time.time()
+            while link.armed and time.time() - t_touch < DISARM_WAIT_MAX_SEC:
+                time.sleep(DISARM_POLL_SEC)
+            waited = time.time() - t_touch
+            if link.armed:
+                log.warn(f"触地后 {waited:.1f}s 仍未自动上锁"
+                         f"（COM_DISARM_LAND 可能配成不自动上锁）")
+            msg = (f"已降落（{mode_name}），"
+                   f"{f'已上锁（触地后 {waited:.1f}s）' if not link.armed else '仍解锁'}。"
+                   f"{param_note}")
             if cancel_ignored:
                 msg += "。取消请求因飞控失效保护已触发而被忽略（飞控优先）"
             log.info(msg)
