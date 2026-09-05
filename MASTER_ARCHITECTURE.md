@@ -51,14 +51,17 @@
 | 维度 | 验收标准 |
 |---|---|
 | **论文（理论）** | 中文毕设优秀（35000+ 字、8 章）+ 1 篇 SCI 投出 + 论文里有 ≥ 1 处第一手实验发现 + 0 注水 |
-| **产品（实践主轴）** | Web 平台真实在线（域名 + HTTPS + 注册登录）+ ≥ 3 个检测场景 + ≥ 1 次真实演示 + 完整 GitHub 开源 |
+| **产品（实践主轴）** | Web 平台真实在线（域名 + HTTPS + 注册登录）+ **≥ 2 个检测场景**（光伏 + 输电）+ **视频→缺陷台账管线** + ≥ 1 次真实演示 + 完整 GitHub 开源 |
 | **软硬协同** | Jetson Orin 真机部署 + INT8 + TensorRT + 真实 FPS/功耗实测 + 1 个 5-10 分钟完整演示视频 + **+ 仿真**（详见 §6） |
 | **工程质量** | 后端 pytest ≥ 60% + CI/CD + Docker + OpenAPI + 架构文档 + 错误监控 |
 | **个人能力** | Web 全栈 + 边缘 AI 部署 + ML 工程 + 产品思维 + 学术写作 |
 
 **+ 你新增的"仿真"维度**：
 
-✅ 在 AirSim / Gazebo / Webots 任一仿真环境中演示无人机航拍 → 模型推理 → 决策反馈的完整闭环。
+✅ 在 **Gazebo Harmonic** 仿真环境中演示无人机航拍 → 模型推理 → 决策反馈的完整闭环，
+**并在 Pixhawk 6C 真机上复现该闭环**。
+> ⚠ 2026-07-27 变更：原文为「AirSim / Gazebo / Webots 任一」。现锁定 Gazebo Harmonic，
+> 且验收标准从「仿真演示」提升为「仿真 + 真机双重验证」。见 §6.1 与 `HARDWARE_FLIGHT_LAYER.md`。
 > 仿真的好处：不依赖真实无人机起飞条件，全套流程可在 PC 上演示，且作为**产品扩展性证据**。
 
 ---
@@ -84,12 +87,17 @@
                │ 推理结果                              ▲
                │                                       │ RTMP/WebRTC 流
                ▼                                       │
-        ┌──────────────┐                       ┌───────┴────────┐
-        │  GIS 地图    │                       │  无人机        │
-        │  (Mapbox)    │                       │  (大疆/PX4/    │
-        │              │                       │   AirSim 仿真) │
-        └──────────────┘                       └────────────────┘
+        ┌──────────────┐                       ┌───────┴──────────────┐
+        │  GIS 地图    │                       │  无人机 (flight/)     │
+        │  (Leaflet)   │                       │  Pixhawk 6C + PX4     │
+        │              │                       │  + 机载电脑 (edge/)   │
+        │              │                       │  仿真: Gazebo Harmonic│
+        └──────────────┘                       └───────────────────────┘
 ```
+
+> ⚠ 2026-07-27 更新：右下角原为模糊占位符「无人机（大疆/PX4/AirSim 仿真）」，
+> 现已由 `flight/` 层实心化为具体硬件与软件栈。见 `HARDWARE_FLIGHT_LAYER.md`。
+> 地图库按 §3.3 技术栈表实际选型为 Leaflet（非 Mapbox），此处同步修正。
 
 ### 3.2 Level 2 — 容器图
 
@@ -142,7 +150,9 @@
 | 对象存储 | MinIO（自建 S3） | 不绑定云厂商、部署简单 |
 | 流媒体 | nginx-rtmp + ffmpeg + WebSocket | 开源、轻量、可定制 |
 | 推理 | ONNX Runtime（云）+ TensorRT（Jetson） | 跨平台 + 边缘优化 |
-| 仿真 | AirSim（Unreal Engine）或 Gazebo + ArduPilot SITL | AirSim 视觉好但重；Gazebo 工业标准 — **见 §6** |
+| 仿真 | **Gazebo Harmonic LTS + PX4 SITL** | PX4 v1.16+ 官方仿真器；AirSim 已归档且本机 AMD GPU 跑不了 UE/Isaac — **见 §6.1** |
+| 飞控 | **PX4 v1.17.0 on Pixhawk 6C** | 开源、文档完善、官方维护测试的板子 — 版本锁见 `flight/VERSIONS.md` |
+| 飞控通信 | **uXRCE-DDS over TELEM2 串口 @921600** | 6C 无以太网口；带宽预算见 `flight/docs/SERIAL_BUDGET.md` |
 | 容器 | Docker + Docker Compose | 一键部署 |
 | CI/CD | GitHub Actions | 免费、生态完整 |
 | 部署 | 阿里云轻量级 VPS + Nginx + Let's Encrypt | 100 元/月，足够 |
@@ -186,14 +196,29 @@ graduation_project/                    ← 项目根
 │   ├── streaming/                     ← RTMP 推流客户端
 │   └── README.md
 │
-├── simulation/                        ← 新：仿真环境
-│   ├── airsim/                        ← AirSim 集成
-│   │   ├── settings.json
-│   │   └── client.py                  ← Python API 控制无人机 + 抓帧
-│   ├── scenarios/                     ← 巡检场景脚本（光伏屋顶 / 输电线路）
-│   └── README.md
+├── flight/                            ← 新（2026-07-27）：飞控层，Window-E 归属
+│   ├── VERSIONS.md                    ← 版本锁定单一来源
+│   ├── MODULE_STATE.md
+│   ├── ros2_ws/src/
+│   │   ├── skylark_flight_msgs/       ← ★ 接口契约（action/msg/srv），飞控无关
+│   │   ├── skylark_autopilot_iface/   ← action 的 PX4 实现
+│   │   ├── skylark_inspection_mode/   ← 巡检任务状态机
+│   │   └── skylark_bridge/            ← 地理配准与数据粘合
+│   ├── params/                        ← QGC 参数基线快照（版本化）+ CHANGELOG
+│   ├── sitl/                          ← PX4 SITL + Gazebo（原 simulation/ 并入此处）
+│   │   ├── bootstrap_wsl2.sh
+│   │   ├── run_sitl.sh
+│   │   └── worlds/                    ← 光伏电站 Gazebo 世界
+│   ├── tools/dds_bandwidth.py         ← 串口带宽估算
+│   └── docs/                          ← WIRING_6C / SERIAL_BUDGET / SAFETY_CHECKLIST
+│
+│   注：原规划的 simulation/ 目录已并入 flight/sitl/。
+│       仿真器由 AirSim 改为 Gazebo Harmonic，见 §6.1。
 │
 ├── .github/workflows/                 ← CI/CD
+├── LICENSE                            ← 新（2026-07-27）：AGPL-3.0
+├── THIRD_PARTY_LICENSES.md            ← 新：依赖许可矩阵 + copyleft 隔离策略
+├── HARDWARE_FLIGHT_LAYER.md           ← 新：飞控层架构增量提案
 └── README.md                          ← 项目主入口
 ```
 
@@ -263,12 +288,14 @@ graduation_project/                    ← 项目根
 
 **主目标**：Web 平台前端 + 多场景模型 + 仿真集成
 
-**M7（12 月）— 前端 + 多场景模型训练**
+**M7（12 月）— 前端 + 第 2 场景模型**
 
 - [ ] Vue 3 项目初始化 + Element Plus + 路由 / 状态管理
 - [ ] 5 个核心页面骨架：登录 / 项目列表 / 任务详情 / 缺陷地图 / 设置
 - [ ] 训练第 2 个场景模型：输电线路缺陷检测（CPLID / Insulator Detection 公开集）
-- [ ] 训练第 3 个场景模型：道路病害检测（RDD2022 公开集）
+- [x] ~~训练第 3 个场景模型：道路病害检测（RDD2022 公开集）~~
+  > **2026-07-27 取消**，换成「真机飞行闭环 + 视频→缺陷台账管线」。理由见 §2 与
+  > `HARDWARE_FLIGHT_LAYER.md` §12。腾出的 3-4 周投入到深度而非广度。
 
 **M8（1 月）— 平台集成**
 
@@ -279,14 +306,21 @@ graduation_project/                    ← 项目根
 - [ ] Docker Compose 一键部署
 - [ ] 部署到阿里云 VPS + 域名 + HTTPS
 
-**M9（2 月）— 仿真 + 实时图传**
+**M9（2 月）— 真机闭环 + 视频→台账管线 + 实时图传**
 
-- [ ] AirSim 集成：在虚拟光伏屋顶环境飞 + 抓帧推理
-- [ ] 真实大疆无人机 RTMP 推流（如果买了无人机）/ 否则用仿真完整顶替
+> 2026-07-27 重写。原内容为 AirSim 集成 + 大疆 RTMP，现改为 **Pixhawk 6C 真机闭环**。
+> 归属从 Window-D 移交 **Window-E**（仿真与飞控同属一事）。
+
+- [ ] **[Window-E]** Gazebo Harmonic 光伏电站世界 + 自主扫掠 + 检出 → 降高复拍闭环（S1 验收）
+- [ ] **[Window-E]** 6C 真机飞行：户外完整自主巡检一次，`.ulg` 可在 `flight_review` 解析（S3 验收）
+- [ ] **[Window-C/E]** **视频 → 缺陷台账管线**：组件跟踪 + 多帧关联 + 地理配准
+      （参考 `PV-Hawk`，MIT 许可，博士项目完整实现）
+- [ ] **[Window-E]** 端到端延迟实测分解：曝光 → 取流 → 推理 → ROS 2 话题 → action → setpoint → 姿态响应
 - [ ] 实时图传 → 后端 ffmpeg 抽帧 → 推理 → WebSocket 推前端
-- [ ] 录制 5-10 分钟完整演示视频
+- [ ] 录制 5-10 分钟完整演示视频（真机版，不再依赖仿真顶替）
 
-**Q3 产出**：Skylark Web 平台真实在线、能注册登录；3 个检测场景；仿真演示视频 + 真机演示视频（如有无人机）。
+**Q3 产出**：Skylark Web 平台真实在线、能注册登录；**2 个检测场景**（光伏 + 输电）；
+**真机自主巡检闭环 + 视频→台账管线**；真机演示视频 + 仿真演示视频。
 
 ### Q4（M10-M12）— 工程化、答辩、收尾
 
@@ -355,6 +389,29 @@ ONNX 导出+量化 ────► Jetson 部署 ─► 边缘推理服务 ─�
 
 ### 6.1 选型决策
 
+> ⚠ **2026-07-27 变更**：本节原决策为 AirSim，现改为 **Gazebo Harmonic LTS**。
+> 完整理由见 `HARDWARE_FLIGHT_LAYER.md` §2.2。原决策与其依据保留在 §6.1-旧 作为审计轨迹。
+
+**最终选 Gazebo Harmonic LTS**。理由：
+
+| 选项 | 优势 | 劣势 | 选择 |
+|---|---|---|---|
+| **Gazebo Harmonic LTS** | **PX4 v1.16+ 官方仿真器** / 与 PX4 SITL 原生集成 / Apache-2.0 / 可在 AMD GPU 上跑 / AAS 用的就是它 | 视觉不如 UE 系 | ✅ |
+| AirSim | 视觉真实 / Unreal 引擎 | **已被微软归档**；主要社区 fork `Colosseum` **亦已归档** | ❌ |
+| Isaac Sim / Pegasus | 视觉顶级 | **要求 NVIDIA RTX**，飞控开发机是 AMD，跑不了 | ❌ |
+| Webots | 轻量、跨平台 | 与 PX4 集成度低于 Gazebo | 备选 |
+
+三条决定性理由：
+
+1. **AirSim 路线已死**。microsoft/AirSim 已归档（微软官方项目页声明），主要社区 fork `CodexLabsLLC/Colosseum` 的 GitHub API 也返回 `archived=true`。继续选它意味着依赖两个都没人维护的仓库
+2. **飞控开发机是 AMD GPU**（`METAMECHBOOK01`，RX 7600M XT + 780M 核显，无 CUDA）。Isaac Sim / Pegasus 要求 NVIDIA RTX；AirSim 的 UE 管线在 AMD + WSL2 上同样吃力。**Gazebo 是这台机器上唯一可行的选项，不是折中，是唯一解**
+3. **「Gazebo 视觉差」的旧判断已过时**。`aerial-autonomy-stack` 内置 `swiss_town`（Pix4D 摄影测量实景世界）与 `apple_orchard`（BlenderGIS 生成的 GIS 世界），对巡检场景完全够用。且 Docker/脚本化后「装机难」也不成立 —— PX4 官方 `Tools/setup/ubuntu.sh` 会自动装 `gz-harmonic`（已在本地源码第 215-231 行核实）
+
+**附带收益**：`simulation/` 目录并入 `flight/sitl/`，少维护一个模块。Gazebo 世界与 PX4 SITL 本来就是一件事。
+
+<details>
+<summary>§6.1-旧 — 2026-07-27 前的原决策（保留作审计轨迹）</summary>
+
 **最终选 AirSim**。理由：
 
 | 选项 | 优势 | 劣势 | 选择 |
@@ -365,6 +422,10 @@ ONNX 导出+量化 ────► Jetson 部署 ─► 边缘推理服务 ─�
 | Isaac Sim | NVIDIA 出品、视觉顶级 | 商用许可 / 显存高 | ❌ |
 
 > AirSim 已被微软停更，但仓库 stable，社区活跃，文献用得最多。学界引用率高，写论文自动加分。
+
+**为什么当时判断错了**：把「仓库 stable」误读为「可以长期依赖」。实际上归档意味着不再接受安全修复与新版本适配 —— 对一个要跑一年的项目是实质风险。且当时未核实社区 fork 的状态。
+
+</details>
 
 ### 6.2 仿真三个用途
 
@@ -387,7 +448,10 @@ ONNX 导出+量化 ────► Jetson 部署 ─► 边缘推理服务 ─�
 ### 6.3 实施时机
 
 放在 Q3 M9（2 月）。**不放 Q1 / Q2** 的原因：
-- AirSim 装机调试约 3-5 天，不能挤算法主线
+- ~~AirSim 装机调试约 3-5 天，不能挤算法主线~~
+  > 2026-07-27 更新：改用 Gazebo Harmonic 后，装机由 PX4 官方 `Tools/setup/ubuntu.sh`
+  > 自动完成（`flight/sitl/bootstrap_wsl2.sh` 已封装），且**跑在另一台机器上**，
+  > 不占用 ML 训练机的 GPU，故不再挤算法主线。这是 §6.3 实施时机提前的依据。
 - 仿真最有价值的时机是平台已经能跑后，仿真数据能直接接进平台演示
 
 ---
@@ -420,7 +484,7 @@ ONNX 导出+量化 ────► Jetson 部署 ─► 边缘推理服务 ─�
 | M6 | Docker、PostgreSQL、SQLAlchemy | 官方文档 |
 | M7 | Vue 3 Composition API、TypeScript | Vue 3 Mastery / Element Plus 文档 |
 | M8 | Celery、Redis、MinIO、Nginx | 官方文档 |
-| M9 | AirSim、Unreal Engine 基础 | AirSim docs / 论文 implementations |
+| M9 | **PX4 / ROS 2 / Gazebo Harmonic / 飞行安全** | PX4 官方文档（本地可离线 grep）+ `aerial-autonomy-stack` 源码 + `flight/docs/` 三份实操文档 |
 | M10 | pytest、GitHub Actions、监控 | 官方文档 |
 
 > **每月 5-10 小时学习投入足以**。其余时间是动手做。**学了不立刻用 = 白学**——学习与做事必须交错。

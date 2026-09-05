@@ -1,0 +1,49 @@
+# 沿给定航点序列飞行。**层内动作，刻意不进 skylark_flight_msgs 契约包。**
+#
+# 为什么不进契约包：契约包是 flight 层对 edge/ 的对外承诺，
+# 它的语义应该是"任务意图"（起飞、环绕、扫掠、复拍），而不是"怎么走"。
+# 航点跟随是实现手段 —— 把它放进契约会让 edge/ 有能力绕过任务语义直接指挥航线，
+# 那正是这套抽象要避免的。
+#
+# 为什么需要它：skylark_inspection_mode 的扫掠需要航点跟随，
+# 但它不能自己发 setpoint（offboard 的 setpoint 流必须只有一个发布者，
+# 见 flight/docs/OFFBOARD_CONSTRAINTS.md 与 INSPECTION_MODE_DESIGN.md §1）。
+# 所以由 inspection_mode 算好航线，交给本动作在 iface 内执行。
+
+# ==================== Goal ====================
+# 航点序列，局部 NED（原点为 EKF 起飞点）。z 用负值表示高度（NED 向下为正）。
+geometry_msgs/Point[] waypoints_ned
+float32 speed_mps 3.0                    # [m/s] 巡航速度
+float32 accept_radius_m 1.5              # [m] 判定"到达某航点"的球半径
+uint8 YAW_ALONG_PATH=0                   # 机头沿航线方向
+uint8 YAW_FIXED=1                        # 机头锁定 yaw_fixed_deg
+uint8 YAW_HOLD=2                         # 保持进入时的朝向
+uint8 yaw_mode 0
+float32 yaw_fixed_deg 0.0                # [deg] yaw_mode=YAW_FIXED 时生效
+uint32 start_index 0                     # 从第几个航点开始（断点续飞）
+float32 timeout_sec 600.0                # [s]
+---
+# ==================== Result ====================
+bool success
+uint8 RESULT_OK=0
+uint8 RESULT_REJECTED_NOT_READY=1        # 未解锁 / 位置无效 / 与飞控失联
+uint8 RESULT_REJECTED_BAD_PATH=2         # 航点数不足、含非法值、或超出距离上限
+uint8 RESULT_TIMEOUT=3
+uint8 RESULT_ABORTED_BY_FAILSAFE=4
+uint8 RESULT_CANCELED=5
+uint8 result_code
+uint32 waypoints_total
+uint32 waypoints_reached
+uint32 last_reached_index                # 供下次 start_index 用，闭合关系见设计文档
+float32 distance_flown_m
+float32 max_cross_track_error_m          # [m] 全程最大航线横向偏差
+float32 elapsed_sec
+string message
+---
+# ==================== Feedback ====================
+uint32 waypoints_total
+uint32 current_index
+float32 progress                         # 0.0 .. 1.0，按已飞距离占总航程
+float32 cross_track_error_m              # [m] 当前航线横向偏差 —— 覆盖率质量的关键指标
+float32 distance_to_next_m               # [m]
+float32 elapsed_sec

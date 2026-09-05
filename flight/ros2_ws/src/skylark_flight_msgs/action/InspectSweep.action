@@ -1,0 +1,67 @@
+# 割草机式（boustrophedon）扫掠巡检 —— 光伏阵列巡检的主力动作。
+#
+# 服务端：skylark_inspection_mode（flight 层的任务状态机）
+#
+# 这是 Skylark 相对通用飞控栈的领域特化动作。AAS 没有这个动作，
+# 因为它面向的是通用感知任务；巡检场景需要"保证覆盖率"这一语义。
+#
+# 与 Revisit 的配合：扫掠过程中若 edge/ 报告高严重度检出，
+# 状态机可暂停扫掠 -> 执行 Revisit -> 回到暂停点续飞。断点由 resume_from_row 表达。
+
+# ==================== Goal ====================
+# 扫掠区域：由两个对角点定义的矩形（WGS84）
+float64 corner_a_latitude_deg
+float64 corner_a_longitude_deg
+float64 corner_b_latitude_deg
+float64 corner_b_longitude_deg
+
+float32 heading_deg 0.0                  # [deg] 扫掠行方向（应与光伏阵列长边对齐）
+
+float32 altitude_agl_m 15.0              # [m] 扫掠高度
+float32 speed_mps 3.0                    # [m/s] 行进速度
+float32 row_spacing_m 6.0                # [m] 相邻行间距
+
+# 覆盖率约束。若 row_spacing_m 与相机视场、高度算出的重叠率低于 min_overlap，
+# 服务端拒绝该 goal 并返回 RESULT_REJECTED_COVERAGE，而不是默默地漏拍。
+float32 min_overlap 0.25                 # 0.0 .. 1.0 相邻行图像重叠率下限
+float32 camera_hfov_deg 0.0              # [deg] 相机水平视场；0 表示由服务端从配置读取
+
+uint32 resume_from_row 0                 # 断点续飞：从第几行开始（0 = 从头）
+bool auto_revisit_on_detection true      # 检出高严重度目标时是否自动插入 Revisit
+uint8 revisit_severity_threshold 3       # 触发阈值，对应 Detection.SEVERITY_MAJOR
+
+float32 timeout_sec 1800.0               # [s]
+
+---
+# ==================== Result ====================
+bool success
+
+uint8 RESULT_OK=0
+uint8 RESULT_REJECTED_NOT_READY=1
+uint8 RESULT_REJECTED_BAD_GEOMETRY=2     # 区域退化 / 超出地理围栏
+uint8 RESULT_REJECTED_COVERAGE=3         # 行间距与视场不满足 min_overlap
+uint8 RESULT_TIMEOUT=4
+uint8 RESULT_ABORTED_BY_FAILSAFE=5
+uint8 RESULT_ABORTED_LOW_BATTERY=6       # 状态机主动中止，保留返航余量
+uint8 RESULT_CANCELED=7
+uint8 result_code
+
+uint32 rows_total
+uint32 rows_completed
+uint32 last_completed_row                # 供下次 resume_from_row 使用
+float32 area_covered_m2
+float32 distance_flown_m
+uint32 revisits_triggered
+float32 elapsed_sec
+string message
+
+---
+# ==================== Feedback ====================
+uint32 rows_total
+uint32 current_row
+float32 progress                         # 0.0 .. 1.0
+float32 cross_track_error_m              # [m] 航线横向偏差，覆盖率质量的关键指标
+float32 battery_remaining
+uint32 detections_so_far
+bool revisit_in_progress                 # true 表示扫掠已暂停，正在执行 Revisit
+float32 elapsed_sec

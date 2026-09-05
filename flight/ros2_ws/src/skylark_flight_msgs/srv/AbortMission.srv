@@ -1,0 +1,27 @@
+# 中止当前任务 —— 安全关键接口。
+#
+# 服务端：skylark_inspection_mode（flight 层）
+#
+# 设计要点：这个服务必须在任何状态下都能被调用并立即响应，
+# 包括状态机内部逻辑已经卡死的情况。实现时应放在独立回调组
+# （MutuallyExclusiveCallbackGroup）里，避免被长耗时动作阻塞。
+#
+# 三重冗余中的第三重：
+#   1. 遥控器切换飞行模式（RC 链路）
+#   2. QGC 界面切换飞行模式（数传链路）
+#   3. 本服务（机载电脑链路）—— ros2 service call 一行命令
+# 参考 AAS 的 BOM.md "Triple Redundancy for RTL" 一节。
+#
+# 本服务不替代飞控自身的失效保护。飞控的自主保护优先级永远最高。
+
+uint8 ACTION_HOLD=0                       # 取消所有动作，原地悬停
+uint8 ACTION_RETURN_TO_LAUNCH=1           # 取消所有动作，返航
+uint8 ACTION_LAND_IN_PLACE=2              # 取消所有动作，原地降落
+uint8 abort_action 0
+
+string reason                             # 必填，会写进飞行日志与任务记录
+---
+bool success
+string[] canceled_actions                 # 被取消的 action 名称列表
+string resulting_mode                     # 中止后飞机进入的模式
+string message

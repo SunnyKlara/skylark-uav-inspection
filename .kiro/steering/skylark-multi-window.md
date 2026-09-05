@@ -33,7 +33,22 @@ inclusion: always
 | 用户启动语句包含 "Window-B" | B |
 | 当前活跃文件在 `code/` 下 | 推测 A，但需用户确认 |
 | 当前活跃文件在 `paper/` 下 | 推测 B，但需用户确认 |
+| 当前活跃文件在 `flight/` 下 | 推测 E，但需用户确认 |
+| 工作机是 `METAMECHBOOK01`（AMD GPU，无 CUDA） | 推测 E —— 该机是飞控开发机 |
 | 不确定 | **询问用户** |
+
+## 机器分工（2026-07-27 起）
+
+本项目跨两台机器，通过 GitHub 同步。**先确认自己在哪台机器上**：
+
+| 机器 | 硬件特征 | 角色 | 窗口 |
+|---|---|---|---|
+| ML 训练机 | RTX 5060 Ti 16 GB，有 E 盘 conda 环境 | 训练 / 量化 / 论文实验 | A / B |
+| `METAMECHBOOK01` | AMD RX 7600M XT，仅 C 盘，无 CUDA | PX4 固件 / SITL / 真机联调 | **E** |
+
+判断方法：`Get-PSDrive`（有无 E 盘）或 `nvidia-smi`（有无 NVIDIA GPU）。
+
+**推论**：GPU lock 协议（铁律 2）只对 ML 训练机有意义。Window-E 所在机器没有 CUDA，不参与 GPU 仲裁。
 
 如果无法识别窗口角色，**先问用户**，再开始工作。不要默认。
 
@@ -48,7 +63,8 @@ inclusion: always
 | `code/**` | Window-A |
 | `paper/**` 和项目根 `*.md` | Window-B |
 | `platform/backend/**` `edge/**` | Window-C |
-| `platform/frontend/**` `simulation/**` | Window-D |
+| `platform/frontend/**` | Window-D |
+| `flight/**` | **Window-E**（含原 `simulation/`，已并入 `flight/sitl/`） |
 | `STATE.md` `.gpu_lock.json` `requirements.txt` | 共享（特殊协议） |
 
 **编辑前判断**：目标文件归属当前窗口？

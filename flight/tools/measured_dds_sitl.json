@@ -1,0 +1,487 @@
+{
+  "measured_at": "2026-07-27T04:52:03+00:00",
+  "environment": "PX4 SITL + Gazebo (gz_x500, headless), WSL2 Ubuntu 22.04",
+  "px4_ref": "v1.17.0",
+  "duration_s": 29.4,
+  "gazebo_rtf_before": 0.9999330044886993,
+  "gazebo_rtf_after": 1.00025656580913,
+  "note": "载荷为 CDR 序列化字节数，不含 XRCE-DDS 帧头与串口起止位。SITL 速率由仿真时钟决定，真机 IMU/EKF2 速率可能不同，S2 需重测。",
+  "total_payload_bytes_per_s": 45265.3,
+  "topics": [
+    {
+      "topic": "/fmu/out/vehicle_odometry",
+      "type": "px4_msgs/msg/VehicleOdometry",
+      "n_msgs": 2210,
+      "size_bytes_mean": 120.0,
+      "size_bytes_min": 120,
+      "size_bytes_max": 120,
+      "rate_hz": 99.989,
+      "arrival_hz": 100.03,
+      "consistent": true,
+      "bytes_per_s": 11998.6,
+      "diag": {
+        "n_samples": 2210,
+        "n_nonmonotonic": 1,
+        "n_outliers": 1,
+        "mean_interval_ms": 10.001,
+        "median_interval_ms": 8.0,
+        "max_interval_ms": 1785127871109.478
+      }
+    },
+    {
+      "topic": "/fmu/out/vehicle_local_position_v1",
+      "type": "px4_msgs/msg/VehicleLocalPosition",
+      "n_msgs": 1105,
+      "size_bytes_mean": 220.0,
+      "size_bytes_min": 220,
+      "size_bytes_max": 220,
+      "rate_hz": 50.008,
+      "arrival_hz": 50.013,
+      "consistent": true,
+      "bytes_per_s": 11001.7,
+      "diag": {
+        "n_samples": 1105,
+        "n_nonmonotonic": 1,
+        "n_outliers": 0,
+        "mean_interval_ms": 19.997,
+        "median_interval_ms": 16.126,
+        "max_interval_ms": 24.141
+      }
+    },
+    {
+      "topic": "/fmu/out/vehicle_attitude",
+      "type": "px4_msgs/msg/VehicleAttitude",
+      "n_msgs": 2210,
+      "size_bytes_mean": 56.0,
+      "size_bytes_min": 56,
+      "size_bytes_max": 56,
+      "rate_hz": 100.007,
+      "arrival_hz": 100.033,
+      "consistent": true,
+      "bytes_per_s": 5600.4,
+      "diag": {
+        "n_samples": 2210,
+        "n_nonmonotonic": 1,
+        "n_outliers": 1,
+        "mean_interval_ms": 9.999,
+        "median_interval_ms": 11.975,
+        "max_interval_ms": 1785127871113.442
+      }
+    },
+    {
+      "topic": "/fmu/out/sensor_combined",
+      "type": "px4_msgs/msg/SensorCombined",
+      "n_msgs": 2211,
+      "size_bytes_mean": 52.0,
+      "size_bytes_min": 52,
+      "size_bytes_max": 52,
+      "rate_hz": 99.998,
+      "arrival_hz": 75.23,
+      "consistent": false,
+      "bytes_per_s": 5199.9,
+      "diag": {
+        "n_samples": 2211,
+        "n_nonmonotonic": 1,
+        "n_outliers": 1,
+        "mean_interval_ms": 10.0,
+        "median_interval_ms": 11.964,
+        "max_interval_ms": 1785127871113.442
+      }
+    },
+    {
+      "topic": "/fmu/out/vehicle_gps_position",
+      "type": "px4_msgs/msg/SensorGps",
+      "n_msgs": 670,
+      "size_bytes_mean": 168.0,
+      "size_bytes_min": 168,
+      "size_bytes_max": 168,
+      "rate_hz": 30.302,
+      "arrival_hz": 30.312,
+      "consistent": true,
+      "bytes_per_s": 5090.8,
+      "diag": {
+        "n_samples": 670,
+        "n_nonmonotonic": 1,
+        "n_outliers": 0,
+        "mean_interval_ms": 33.001,
+        "median_interval_ms": 32.0,
+        "max_interval_ms": 36.092
+      }
+    },
+    {
+      "topic": "/fmu/out/vehicle_global_position",
+      "type": "px4_msgs/msg/VehicleGlobalPosition",
+      "n_msgs": 1105,
+      "size_bytes_mean": 76.0,
+      "size_bytes_min": 76,
+      "size_bytes_max": 76,
+      "rate_hz": 50.026,
+      "arrival_hz": 50.013,
+      "consistent": true,
+      "bytes_per_s": 3802.0,
+      "diag": {
+        "n_samples": 1105,
+        "n_nonmonotonic": 1,
+        "n_outliers": 0,
+        "mean_interval_ms": 19.99,
+        "median_interval_ms": 16.096,
+        "max_interval_ms": 24.141
+      }
+    },
+    {
+      "topic": "/fmu/out/position_setpoint_triplet",
+      "type": "px4_msgs/msg/PositionSetpointTriplet",
+      "n_msgs": 110,
+      "size_bytes_mean": 276.0,
+      "size_bytes_min": 276,
+      "size_bytes_max": 276,
+      "rate_hz": 5.007,
+      "arrival_hz": 5.001,
+      "consistent": true,
+      "bytes_per_s": 1382.0,
+      "diag": {
+        "n_samples": 110,
+        "n_nonmonotonic": 1,
+        "n_outliers": 0,
+        "mean_interval_ms": 199.707,
+        "median_interval_ms": 200.0,
+        "max_interval_ms": 208.0
+      }
+    },
+    {
+      "topic": "/fmu/out/timesync_status",
+      "type": "px4_msgs/msg/TimesyncStatus",
+      "n_msgs": 43,
+      "size_bytes_mean": 48.0,
+      "size_bytes_min": 48,
+      "size_bytes_max": 48,
+      "rate_hz": 10.053,
+      "arrival_hz": 1.971,
+      "consistent": false,
+      "bytes_per_s": 482.6,
+      "diag": {
+        "n_samples": 43,
+        "n_nonmonotonic": 1,
+        "n_outliers": 19,
+        "mean_interval_ms": 99.471,
+        "median_interval_ms": 100.089,
+        "max_interval_ms": 1785127871101.429
+      }
+    },
+    {
+      "topic": "/fmu/out/battery_status_v1",
+      "type": "px4_msgs/msg/BatteryStatus",
+      "n_msgs": 22,
+      "size_bytes_mean": 180.0,
+      "size_bytes_min": 180,
+      "size_bytes_max": 180,
+      "rate_hz": 1.0,
+      "arrival_hz": 1.0,
+      "consistent": true,
+      "bytes_per_s": 180.0,
+      "diag": {
+        "n_samples": 22,
+        "n_nonmonotonic": 1,
+        "n_outliers": 0,
+        "mean_interval_ms": 1000.013,
+        "median_interval_ms": 1000.0,
+        "max_interval_ms": 1000.085
+      }
+    },
+    {
+      "topic": "/fmu/out/failsafe_flags",
+      "type": "px4_msgs/msg/FailsafeFlags",
+      "n_msgs": 41,
+      "size_bytes_mean": 96.0,
+      "size_bytes_min": 96,
+      "size_bytes_max": 96,
+      "rate_hz": 1.852,
+      "arrival_hz": 1.852,
+      "consistent": true,
+      "bytes_per_s": 177.8,
+      "diag": {
+        "n_samples": 41,
+        "n_nonmonotonic": 1,
+        "n_outliers": 0,
+        "mean_interval_ms": 540.002,
+        "median_interval_ms": 540.0,
+        "max_interval_ms": 540.075
+      }
+    },
+    {
+      "topic": "/fmu/out/vehicle_status_v1",
+      "type": "px4_msgs/msg/VehicleStatus",
+      "n_msgs": 43,
+      "size_bytes_mean": 84.0,
+      "size_bytes_min": 84,
+      "size_bytes_max": 84,
+      "rate_hz": 1.984,
+      "arrival_hz": 1.985,
+      "consistent": true,
+      "bytes_per_s": 166.7,
+      "diag": {
+        "n_samples": 43,
+        "n_nonmonotonic": 1,
+        "n_outliers": 0,
+        "mean_interval_ms": 504.001,
+        "median_interval_ms": 504.0,
+        "max_interval_ms": 504.042
+      }
+    },
+    {
+      "topic": "/fmu/out/estimator_status_flags",
+      "type": "px4_msgs/msg/EstimatorStatusFlags",
+      "n_msgs": 22,
+      "size_bytes_mean": 104.0,
+      "size_bytes_min": 104,
+      "size_bytes_max": 104,
+      "rate_hz": 0.992,
+      "arrival_hz": 0.992,
+      "consistent": true,
+      "bytes_per_s": 103.2,
+      "diag": {
+        "n_samples": 22,
+        "n_nonmonotonic": 1,
+        "n_outliers": 0,
+        "mean_interval_ms": 1008.015,
+        "median_interval_ms": 1008.0,
+        "max_interval_ms": 1008.117
+      }
+    },
+    {
+      "topic": "/fmu/out/vehicle_control_mode",
+      "type": "px4_msgs/msg/VehicleControlMode",
+      "n_msgs": 43,
+      "size_bytes_mean": 28.0,
+      "size_bytes_min": 28,
+      "size_bytes_max": 28,
+      "rate_hz": 1.984,
+      "arrival_hz": 1.985,
+      "consistent": true,
+      "bytes_per_s": 55.6,
+      "diag": {
+        "n_samples": 43,
+        "n_nonmonotonic": 1,
+        "n_outliers": 0,
+        "mean_interval_ms": 504.001,
+        "median_interval_ms": 504.0,
+        "max_interval_ms": 504.042
+      }
+    },
+    {
+      "topic": "/fmu/out/vehicle_land_detected",
+      "type": "px4_msgs/msg/VehicleLandDetected",
+      "n_msgs": 23,
+      "size_bytes_mean": 24.0,
+      "size_bytes_min": 24,
+      "size_bytes_max": 24,
+      "rate_hz": 1.0,
+      "arrival_hz": 1.0,
+      "consistent": true,
+      "bytes_per_s": 24.0,
+      "diag": {
+        "n_samples": 23,
+        "n_nonmonotonic": 1,
+        "n_outliers": 0,
+        "mean_interval_ms": 1000.009,
+        "median_interval_ms": 1000.0,
+        "max_interval_ms": 1000.042
+      }
+    },
+    {
+      "topic": "/fmu/out/airspeed_validated_v1",
+      "type": "px4_msgs/msg/AirspeedValidated",
+      "n_msgs": 0,
+      "size_bytes_mean": null,
+      "size_bytes_min": null,
+      "size_bytes_max": null,
+      "rate_hz": null,
+      "arrival_hz": null,
+      "consistent": null,
+      "bytes_per_s": null,
+      "diag": {
+        "n_samples": 0
+      }
+    },
+    {
+      "topic": "/fmu/out/arming_check_request_v1",
+      "type": "px4_msgs/msg/ArmingCheckRequest",
+      "n_msgs": 0,
+      "size_bytes_mean": null,
+      "size_bytes_min": null,
+      "size_bytes_max": null,
+      "rate_hz": null,
+      "arrival_hz": null,
+      "consistent": null,
+      "bytes_per_s": null,
+      "diag": {
+        "n_samples": 0
+      }
+    },
+    {
+      "topic": "/fmu/out/collision_constraints",
+      "type": "px4_msgs/msg/CollisionConstraints",
+      "n_msgs": 0,
+      "size_bytes_mean": null,
+      "size_bytes_min": null,
+      "size_bytes_max": null,
+      "rate_hz": null,
+      "arrival_hz": null,
+      "consistent": null,
+      "bytes_per_s": null,
+      "diag": {
+        "n_samples": 0
+      }
+    },
+    {
+      "topic": "/fmu/out/gimbal_device_attitude_status",
+      "type": "px4_msgs/msg/GimbalDeviceAttitudeStatus",
+      "n_msgs": 0,
+      "size_bytes_mean": null,
+      "size_bytes_min": null,
+      "size_bytes_max": null,
+      "rate_hz": null,
+      "arrival_hz": null,
+      "consistent": null,
+      "bytes_per_s": null,
+      "diag": {
+        "n_samples": 0
+      }
+    },
+    {
+      "topic": "/fmu/out/home_position_v1",
+      "type": "px4_msgs/msg/HomePosition",
+      "n_msgs": 0,
+      "size_bytes_mean": null,
+      "size_bytes_min": null,
+      "size_bytes_max": null,
+      "rate_hz": null,
+      "arrival_hz": null,
+      "consistent": null,
+      "bytes_per_s": null,
+      "diag": {
+        "n_samples": 0
+      }
+    },
+    {
+      "topic": "/fmu/out/manual_control_setpoint",
+      "type": "px4_msgs/msg/ManualControlSetpoint",
+      "n_msgs": 0,
+      "size_bytes_mean": null,
+      "size_bytes_min": null,
+      "size_bytes_max": null,
+      "rate_hz": null,
+      "arrival_hz": null,
+      "consistent": null,
+      "bytes_per_s": null,
+      "diag": {
+        "n_samples": 0
+      }
+    },
+    {
+      "topic": "/fmu/out/message_format_response",
+      "type": "px4_msgs/msg/MessageFormatResponse",
+      "n_msgs": 0,
+      "size_bytes_mean": null,
+      "size_bytes_min": null,
+      "size_bytes_max": null,
+      "rate_hz": null,
+      "arrival_hz": null,
+      "consistent": null,
+      "bytes_per_s": null,
+      "diag": {
+        "n_samples": 0
+      }
+    },
+    {
+      "topic": "/fmu/out/mode_completed",
+      "type": "px4_msgs/msg/ModeCompleted",
+      "n_msgs": 0,
+      "size_bytes_mean": null,
+      "size_bytes_min": null,
+      "size_bytes_max": null,
+      "rate_hz": null,
+      "arrival_hz": null,
+      "consistent": null,
+      "bytes_per_s": null,
+      "diag": {
+        "n_samples": 0
+      }
+    },
+    {
+      "topic": "/fmu/out/register_ext_component_reply",
+      "type": "px4_msgs/msg/RegisterExtComponentReply",
+      "n_msgs": 0,
+      "size_bytes_mean": null,
+      "size_bytes_min": null,
+      "size_bytes_max": null,
+      "rate_hz": null,
+      "arrival_hz": null,
+      "consistent": null,
+      "bytes_per_s": null,
+      "diag": {
+        "n_samples": 0
+      }
+    },
+    {
+      "topic": "/fmu/out/transponder_report",
+      "type": "px4_msgs/msg/TransponderReport",
+      "n_msgs": 0,
+      "size_bytes_mean": null,
+      "size_bytes_min": null,
+      "size_bytes_max": null,
+      "rate_hz": null,
+      "arrival_hz": null,
+      "consistent": null,
+      "bytes_per_s": null,
+      "diag": {
+        "n_samples": 0
+      }
+    },
+    {
+      "topic": "/fmu/out/vehicle_command_ack",
+      "type": "px4_msgs/msg/VehicleCommandAck",
+      "n_msgs": 0,
+      "size_bytes_mean": null,
+      "size_bytes_min": null,
+      "size_bytes_max": null,
+      "rate_hz": null,
+      "arrival_hz": null,
+      "consistent": null,
+      "bytes_per_s": null,
+      "diag": {
+        "n_samples": 0
+      }
+    },
+    {
+      "topic": "/fmu/out/vtol_vehicle_status",
+      "type": "px4_msgs/msg/VtolVehicleStatus",
+      "n_msgs": 0,
+      "size_bytes_mean": null,
+      "size_bytes_min": null,
+      "size_bytes_max": null,
+      "rate_hz": null,
+      "arrival_hz": null,
+      "consistent": null,
+      "bytes_per_s": null,
+      "diag": {
+        "n_samples": 0
+      }
+    },
+    {
+      "topic": "/fmu/out/wind",
+      "type": "px4_msgs/msg/Wind",
+      "n_msgs": 0,
+      "size_bytes_mean": null,
+      "size_bytes_min": null,
+      "size_bytes_max": null,
+      "rate_hz": null,
+      "arrival_hz": null,
+      "consistent": null,
+      "bytes_per_s": null,
+      "diag": {
+        "n_samples": 0
+      }
+    }
+  ]
+}

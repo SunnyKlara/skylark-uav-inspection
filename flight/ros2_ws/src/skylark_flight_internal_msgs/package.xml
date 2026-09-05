@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://relaxng.org/ns/structure/1.0"?>
+<package format="3">
+  <name>skylark_flight_internal_msgs</name>
+  <version>0.1.0</version>
+  <description>
+    flight 层的**内部**接口。刻意与 skylark_flight_msgs 分开。
+
+    skylark_flight_msgs 是 flight 层对 edge/ 的对外契约，语义是"任务意图"
+    （起飞、环绕、扫掠、复拍）。本包放的是实现手段（如航点跟随），
+    只在 flight 层内部使用。edge/ 不应依赖本包 —— 包名即边界。
+
+    分包还有两个实际好处：
+    1. 契约包的接口数量是文档里被引用的数字（14 个），内部接口混进去会打乱它
+    2. ament_python 包无法生成 IDL，接口必须放在 ament_cmake 包里
+  </description>
+  <maintainer email="klara@example.invalid">Skylark Window-E</maintainer>
+  <license>AGPL-3.0-or-later</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+
+  <depend>geometry_msgs</depend>
+
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <member_of_group>rosidl_interface_packages</member_of_group>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

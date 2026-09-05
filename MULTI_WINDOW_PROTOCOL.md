@@ -161,7 +161,7 @@ docker-compose.yml（platform 目录下）
 **职责**：
 - Vue 3 前端代码
 - Element Plus + Leaflet + ECharts 集成
-- AirSim 仿真集成
+- ~~AirSim 仿真集成~~ → 已移交 Window-E，改用 Gazebo Harmonic（见 `HARDWARE_FLIGHT_LAYER.md` §2.2/§2.3）
 - 演示视频脚本与录制
 - 多场景模型路由的前端表现层
 

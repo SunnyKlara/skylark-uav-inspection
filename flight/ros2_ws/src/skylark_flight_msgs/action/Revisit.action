@@ -1,0 +1,73 @@
+# 对疑似缺陷点降高复拍 —— "AI 反馈控制飞行决策"的具体载体。
+#
+# 服务端：skylark_inspection_mode（flight 层）
+# 典型调用方：edge/ 的推理节点，或 InspectSweep 内部自动触发
+#
+# 这个动作是整个项目"软硬协同"叙事的核心：
+#   巡航高度检出可疑目标（低分辨率、低置信度）
+#     -> 请求 Revisit
+#     -> 飞机降到更低高度、悬停、连拍
+#     -> 用更高 GSD 的图像复核
+#   这是单纯"拍完回去跑模型"做不到的闭环。
+#
+# 安全边界：本动作的所有参数都会被服务端夹紧到安全范围内
+# （最低高度、最大偏移、地理围栏、剩余电量余量）。
+# 调用方给出的值是"请求"而非"命令"，实际执行值见 Result.actual_* 字段。
+
+# ==================== Goal ====================
+# 复拍目标位置。二选一。
+bool use_current_position true            # true = 就在当前水平位置下降
+float64 target_latitude_deg               # use_current_position=false 时生效
+float64 target_longitude_deg
+
+float32 descend_to_agl_m 8.0              # [m] 请求的复拍高度（会被夹紧到 >= 安全下限）
+float32 hover_sec 4.0                     # [s] 悬停时长
+uint16 capture_burst 5                    # 连拍张数；0 表示只悬停不额外触发拍摄
+
+bool return_to_origin true                # 完成后是否回到调用前的位姿（扫掠续飞需要 true）
+
+string trigger_reason                     # 溯源用，如 "yolo11n_full:crack:conf=0.41"
+uint8 trigger_severity                    # 对应 Detection.severity
+
+float32 timeout_sec 120.0                 # [s]
+
+---
+# ==================== Result ====================
+bool success
+
+uint8 RESULT_OK=0
+uint8 RESULT_REJECTED_NOT_READY=1
+uint8 RESULT_REJECTED_UNSAFE=2            # 目标点在地理围栏外，或下降高度低于安全下限且无法夹紧
+uint8 RESULT_REJECTED_RATE_LIMITED=3      # 复拍请求过于频繁（防止误检导致飞机反复下降）
+uint8 RESULT_TIMEOUT=4
+uint8 RESULT_ABORTED_BY_FAILSAFE=5
+uint8 RESULT_ABORTED_LOW_BATTERY=6
+uint8 RESULT_CANCELED=7
+uint8 result_code
+
+# 实际执行值（可能被安全逻辑夹紧过，与 Goal 不同）
+float32 actual_agl_m                      # [m] 实际到达的复拍高度
+float32 actual_hover_sec                  # [s]
+uint16 images_captured
+bool returned_to_origin
+
+# 端到端延迟分解 —— 这组数据是论文里"AI 反馈闭环延迟"实验的原始素材
+uint32 latency_goal_to_motion_ms          # [ms] 收到 goal 到飞机开始动作
+uint32 latency_goal_to_onstation_ms       # [ms] 收到 goal 到到位悬停稳定
+
+float32 elapsed_sec
+string message
+
+---
+# ==================== Feedback ====================
+uint8 PHASE_ACCEPTED=0
+uint8 PHASE_TRANSIT=1
+uint8 PHASE_DESCENDING=2
+uint8 PHASE_HOVERING=3
+uint8 PHASE_CAPTURING=4
+uint8 PHASE_RETURNING=5
+uint8 phase
+
+float32 current_agl_m                     # [m]
+uint16 images_captured
+float32 elapsed_sec

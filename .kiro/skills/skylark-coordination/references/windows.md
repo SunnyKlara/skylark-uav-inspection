@@ -7,7 +7,15 @@
 | **Window-A** | ML 主线 | ✅ 活跃 | ✅ | ✅ | ✅ |
 | **Window-B** | 论文 + 文档 | ✅ 活跃 | ✅ | ✅ | ✅ |
 | **Window-C** | 后端 + 边缘 | — | ✅ 启动 | ✅ | ✅ |
-| **Window-D** | 前端 + 仿真 | — | — | ✅ 启动 | ✅ |
+| **Window-D** | 前端 | — | — | ✅ 启动 | ✅ |
+| **Window-E** | 飞控 + 仿真 | ✅ 已启动<br>（低强度并行） | ✅ | ✅ | ✅ |
+
+> **2026-07-27 变更**：新增 Window-E（飞控 + 仿真）。原属 Window-D 的 `simulation/` 并入
+> Window-E 的 `flight/sitl/`（Gazebo 世界与 PX4 SITL 是一件事）。Window-D 收缩为纯前端。
+> 完整理由见 `HARDWARE_FLIGHT_LAYER.md` §2.3。
+>
+> Window-E 在 Q1 即启动，但**低强度并行**（每周 3-5 小时，优先安排在 v2 训练等待时段）。
+> 允许 Q1 启动的前提是：它跑在**另一台机器**上（AMD GPU，无 CUDA），不与 v2 训练抢 GPU。
 
 ## 文件归属表（精确版）
 
@@ -73,13 +81,37 @@ ml/deploy/quantize.py      # INT8 量化
 docker-compose.yml         # platform 目录下
 ```
 
-### Window-D（前端 + 仿真）独占（Q3 起）
+### Window-D（前端）独占（Q3 起）
 
 ```
 platform/frontend/**       # Vue 3 前端
-simulation/**              # AirSim
 docs/demo/**               # 演示视频脚本
 ```
+
+> 原列的 `simulation/**` 已移交 Window-E（并入 `flight/sitl/`）。
+
+### Window-E（飞控 + 仿真）独占（2026-07-27 起）
+
+```
+flight/**                  # 飞控层全部内容
+├── ros2_ws/src/skylark_*/ # 接口契约与 ROS 2 节点
+├── params/**              # QGC 参数基线快照 + CHANGELOG
+├── sitl/**                # PX4 SITL + Gazebo（原 simulation/）
+├── tools/**               # dds_bandwidth.py 等
+├── docs/**                # WIRING_6C / SERIAL_BUDGET / SAFETY_CHECKLIST
+├── VERSIONS.md            # 版本锁定单一来源
+└── MODULE_STATE.md
+
+HARDWARE_FLIGHT_LAYER.md   # 飞控层架构提案（E 主写，B 追认）
+```
+
+**Window-E 的特殊约定**：
+
+1. **不参与 GPU lock 协议**。它在另一台机器（AMD GPU，无 CUDA）上，与 ML 训练物理隔离
+2. **版本号只在 `flight/VERSIONS.md` 一处定义**。其他文件引用它，不各自硬编
+3. **`flight/params/` 下的 `.params` 必须是纯文本**，不用 `.gz` 或二进制格式 —— 否则 git diff 失去意义
+4. **涉及硬件的操作必须由用户执行**（接线、上电、刷固件、飞行）。Window-E 只能写代码、写文档、做静态校验
+5. **安全相关改动（失效保护参数、地理围栏、`Revisit` 的高度夹紧逻辑）必须在 `params/CHANGELOG.md` 留痕**
 
 ## 共享文件（特殊规则）
 

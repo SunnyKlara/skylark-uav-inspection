@@ -1,0 +1,15 @@
+# 设置巡航速度上限。
+#
+# 服务端：skylark_autopilot_iface（flight 层）
+# 语义：即时生效，但受飞控参数上限约束（MPC_XY_VEL_MAX 等）。
+#       实际生效值见 applied_* 字段 —— 请求值可能被夹紧。
+
+float32 horizontal_mps                    # [m/s] <=0 表示不修改
+float32 vertical_up_mps                   # [m/s] <=0 表示不修改
+float32 vertical_down_mps                 # [m/s] <=0 表示不修改
+---
+bool success
+float32 applied_horizontal_mps            # [m/s] 实际生效值
+float32 applied_vertical_up_mps
+float32 applied_vertical_down_mps
+string message

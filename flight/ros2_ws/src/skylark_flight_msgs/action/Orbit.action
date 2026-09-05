@@ -1,0 +1,48 @@
+# 绕指定点定圆巡视。
+#
+# 巡检用途：对单个目标（一根塔杆、一台逆变器、一处疑似缺陷区）做多视角环绕拍摄。
+# 服务端：skylark_autopilot_iface（flight 层）
+
+# ==================== Goal ====================
+# 圆心。二选一：给经纬度，或给相对当前位置的 NED 偏移。
+bool use_global_center false
+float64 center_latitude_deg              # use_global_center=true 时生效
+float64 center_longitude_deg
+float32 center_north_m                   # use_global_center=false 时生效，相对起飞点 NED
+float32 center_east_m
+
+float32 altitude_agl_m 20.0              # [m]
+float32 radius_m 15.0                    # [m]
+float32 speed_mps 2.0                    # [m/s] 切向速度
+
+uint8 YAW_FACE_CENTER=0                  # 机头始终指向圆心（拍摄目标常用）
+uint8 YAW_FACE_TANGENT=1                 # 机头沿切向
+uint8 YAW_HOLD=2                         # 保持当前朝向
+uint8 yaw_mode 0
+
+bool clockwise true
+float32 revolutions 1.0                  # 圈数，可为小数
+float32 timeout_sec 300.0                # [s]
+
+---
+# ==================== Result ====================
+bool success
+
+uint8 RESULT_OK=0
+uint8 RESULT_REJECTED_NOT_READY=1
+uint8 RESULT_REJECTED_BAD_GEOMETRY=2     # 半径过小 / 圆心过远 / 超出地理围栏
+uint8 RESULT_TIMEOUT=3
+uint8 RESULT_ABORTED_BY_FAILSAFE=4
+uint8 RESULT_CANCELED=5
+uint8 result_code
+
+float32 revolutions_completed
+float32 elapsed_sec
+string message
+
+---
+# ==================== Feedback ====================
+float32 revolutions_completed
+float32 bearing_deg                      # [deg] 当前相对圆心的方位角
+float32 radius_error_m                   # [m] 实际半径与目标的偏差，用于评估跟踪质量
+float32 elapsed_sec
